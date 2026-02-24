@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google'
 import '@/styles/globals.css'
 import Footer from '@/components/Footer'
 import Navbar from '@/components/Navbar'
+import { FreighterProvider } from '@/contexts/FreighterContext'
 
 const inter = Inter({
   subsets: ['latin'],
@@ -24,11 +25,13 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <body className={inter.className}>
         {/* TODO: Add FreighterProvider wrapper (see FE-2) */}
-        <div className="flex min-h-screen flex-col bg-[rgb(var(--background))] text-[rgb(var(--foreground))] antialiased">
-          <Navbar />
-          <main className="flex-1">{children}</main>
-          <Footer />
-        </div>
+        <FreighterProvider>
+          <div className="flex min-h-screen flex-col bg-[rgb(var(--background))] text-[rgb(var(--foreground))] antialiased">
+            <Navbar />
+            <main className="flex-1">{children}</main>
+            <Footer />
+          </div>
+        </FreighterProvider>
       </body>
     </html>
   )
