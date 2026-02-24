@@ -21,7 +21,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         />
       )}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-72 border-r border-slate-800 bg-slate-950 p-6 transition-transform duration-200 md:hidden ${
+        className={`fixed inset-y-0 left-0 z-50 w-72 border-r border-[rgb(var(--border))] bg-[rgb(var(--surface))] p-6 transition-transform duration-200 md:hidden ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
         aria-hidden={!isOpen}
@@ -31,7 +31,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md p-2 text-slate-200 hover:bg-slate-900"
+            className="rounded-md p-2 text-[rgb(var(--foreground))] hover:bg-[rgb(var(--muted))]"
             aria-label="Close menu"
           >
             <X className="h-5 w-5" />
@@ -43,7 +43,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
               key={item.href}
               href={item.href}
               onClick={onClose}
-              className="rounded-md px-3 py-2 text-sm text-slate-300 hover:bg-slate-900 hover:text-slate-100"
+              className="rounded-md px-3 py-2 text-sm text-[rgb(var(--muted-foreground))] hover:bg-[rgb(var(--muted))] hover:text-[rgb(var(--foreground))]"
             >
               {item.label}
             </Link>
