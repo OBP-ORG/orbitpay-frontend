@@ -1,4 +1,5 @@
 import { BatchPayrollCreation } from '@/components/BatchPayrollCreation'
+import { PayrollAnalytics } from '@/components/PayrollAnalytics'
 
 export default function PayrollPage() {
   return (
@@ -11,6 +12,7 @@ export default function PayrollPage() {
       <h2 className="text-2xl font-bold mb-2 text-white">📤 Batch Payroll Creation</h2>
       <p className="text-gray-400 mb-6">Upload a CSV file to create multiple payroll streams at once.</p>
       <BatchPayrollCreation />
+      <PayrollAnalytics />
     </div>
   )
 }
