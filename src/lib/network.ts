@@ -17,7 +17,7 @@ export const NETWORK = {
  * TODO: Add deployed contract IDs (contributor task FE-4)
  */
 export const CONTRACTS = {
-	treasury: "",
+	treasury: "CA4Z3Q3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3", // Placeholder - replace with actual deployed contract ID
 	payrollStream:
 		"CB4Z3Q3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3", // Placeholder - replace with actual deployed contract ID
 	vesting: "",
