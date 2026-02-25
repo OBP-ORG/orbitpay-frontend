@@ -1,3 +1,4 @@
+import { PayrollAnalytics } from '@/components/PayrollAnalytics'
 import ActiveStreamsList from '@/components/ActiveStreamsList'
 
 export default function PayrollPage() {
@@ -8,7 +9,10 @@ export default function PayrollPage() {
         Create and manage continuous payment streams to your team members.
       </p>
 
-      <ActiveStreamsList />
+      <PayrollAnalytics />
+      <div className="mt-12">
+        <ActiveStreamsList />
+      </div>
     </div>
   )
 }
