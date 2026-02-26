@@ -10,7 +10,7 @@ export const NETWORK = {
 } as const;
 
 export const CONTRACTS = {
-	treasury: "CA4Z3Q3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3", // Placeholder - replace with actual deployed contract ID
+	treasury: "",
 	payrollStream:
 		"CB4Z3Q3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3Z3", // Placeholder - replace with actual deployed contract ID
 	vesting: "",
