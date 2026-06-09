@@ -1,41 +1,60 @@
-import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
-import '@/styles/globals.css'
-import Footer from '@/components/Footer'
-import Navbar from '@/components/Navbar'
-import { FreighterProvider } from '@/contexts/FreighterContext'
+import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import "./globals.css";
+import Navbar from "@/components/navbar";
+import { FreighterProvider } from "@/contexts/FreighterContext";
 
-const inter = Inter({
-  subsets: ['latin'],
-  display: 'swap',
-})
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
 
 export const metadata: Metadata = {
-  title: 'OrbitPay — Decentralized Payroll & Treasury on Stellar',
-  description:
-    'Manage payroll streaming, token vesting, and multi-sig treasury operations on-chain with Stellar Soroban smart contracts.',
-}
-
-import { ToastProvider } from '@/components/ui/Toast'
+  title: "OrbitPay Dashboard",
+  description: "Decentralized payroll and treasury management on Stellar",
+};
 
 export default function RootLayout({
   children,
-}: {
-  children: React.ReactNode
-}) {
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
-    <html lang="en" className="dark">
-      <body className={inter.className}>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
+    >
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  var theme = localStorage.getItem('theme');
+                  var systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                  if (theme === 'light') {
+                    document.documentElement.classList.remove('dark');
+                  } else if (theme === 'dark' || !theme || systemDark) {
+                    document.documentElement.classList.add('dark');
+                  }
+                } catch(e) {}
+              })();
+            `,
+          }}
+        />
+      </head>
+      <body className="min-h-full flex flex-col bg-background">
         <FreighterProvider>
-          <ToastProvider>
-            <div className="flex min-h-screen flex-col bg-[rgb(var(--background))] text-[rgb(var(--foreground))] antialiased">
-              <Navbar />
-              <main className="flex-1">{children}</main>
-              <Footer />
-            </div>
-          </ToastProvider>
+          <Navbar />
+          <main className="flex-1">{children}</main>
         </FreighterProvider>
       </body>
     </html>
-  )
+  );
 }

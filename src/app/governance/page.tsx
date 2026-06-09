@@ -1,347 +1,122 @@
-'use client'
+"use client"
 
-import { useState } from 'react'
-import { useGovernance, type Proposal, type VoteChoice } from '@/hooks/useGovernance'
-import { CheckCircle, Clock, XCircle, Loader2, ChevronDown, ChevronUp } from 'lucide-react'
+import { useState } from "react"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Progress } from "@/components/ui/progress"
+import { Scale, ThumbsUp, ThumbsDown, Plus, Clock, Users } from "lucide-react"
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+const proposals = [
+  { id: "P-001", title: "Q3 Engineering Payroll Budget", description: "Allocate 150,000 XLM for Q3 engineering team salaries via streaming payroll", status: "Active", action: "Funding", votesFor: 12, votesAgainst: 3, totalWeight: 25, quorum: 15, proposer: "GA...XYZ", endTime: "2026-06-15", amount: "150,000 XLM" },
+  { id: "P-002", title: "Update Treasury Threshold", description: "Increase multi-sig threshold from 3-of-5 to 4-of-7", status: "Active", action: "PolicyChange", votesFor: 8, votesAgainst: 2, totalWeight: 25, quorum: 15, proposer: "GB...ABC", endTime: "2026-06-10", amount: null },
+  { id: "P-003", title: "Community Grant Distribution", description: "Distribute 50,000 XLM to community contributors via vesting", status: "Approved", action: "Funding", votesFor: 20, votesAgainst: 1, totalWeight: 25, quorum: 15, proposer: "GC...DEF", endTime: "2026-05-20", amount: "50,000 XLM" },
+]
 
-function statusBadge(status: Proposal['status']) {
-  const map: Record<Proposal['status'], { label: string; className: string }> = {
-    Active:    { label: 'Active',    className: 'bg-sky-500/15 text-sky-300 border-sky-500/30' },
-    Approved:  { label: 'Approved',  className: 'bg-green-500/15 text-green-300 border-green-500/30' },
-    Rejected:  { label: 'Rejected',  className: 'bg-red-500/15 text-red-300 border-red-500/30' },
-    Executed:  { label: 'Executed',  className: 'bg-purple-500/15 text-purple-300 border-purple-500/30' },
-    Cancelled: { label: 'Cancelled', className: 'bg-gray-500/15 text-gray-400 border-gray-500/30' },
-    Expired:   { label: 'Expired',   className: 'bg-orange-500/15 text-orange-300 border-orange-500/30' },
-  }
-  const { label, className } = map[status] ?? map.Active
-  return (
-    <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${className}`}>
-      {label}
-    </span>
-  )
-}
-
-function truncate(addr: string, chars = 6) {
-  if (addr.length <= chars * 2 + 3) return addr
-  return `${addr.slice(0, chars)}...${addr.slice(-chars)}`
-}
-
-function formatAmount(raw: bigint, decimals = 7) {
-  const num = Number(raw) / 10 ** decimals
-  return num.toLocaleString(undefined, { maximumFractionDigits: 2 })
-}
-
-function isExpired(endTime: number) {
-  return Date.now() / 1000 > endTime
-}
-
-// ── VoteTally ─────────────────────────────────────────────────────────────────
-
-function VoteTally({ proposal }: { proposal: Proposal }) {
-  const total = Number(proposal.yesVotes + proposal.noVotes + proposal.abstainVotes) || 1
-
-  const bars: { label: string; votes: bigint; color: string }[] = [
-    { label: 'Yes',     votes: proposal.yesVotes,     color: 'bg-green-500' },
-    { label: 'No',      votes: proposal.noVotes,       color: 'bg-red-500'   },
-    { label: 'Abstain', votes: proposal.abstainVotes,  color: 'bg-gray-500'  },
-  ]
-
-  return (
-    <div className="space-y-2">
-      {bars.map(({ label, votes, color }) => {
-        const pct = Math.round((Number(votes) / total) * 100)
-        return (
-          <div key={label}>
-            <div className="flex justify-between text-xs text-gray-400 mb-1">
-              <span>{label}</span>
-              <span>{votes.toString()} ({pct}%)</span>
-            </div>
-            <div className="h-1.5 rounded-full bg-gray-700 overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${color}`}
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-// ── ProposalCard ──────────────────────────────────────────────────────────────
-
-function ProposalCard({
-  proposal,
-  publicKey,
-  isConnected,
-  onVote,
-  isVoting,
-}: {
-  proposal: Proposal
-  publicKey: string | null
-  isConnected: boolean
-  onVote: (id: number, choice: VoteChoice) => Promise<void>
-  isVoting: boolean
-}) {
-  const [expanded, setExpanded] = useState(false)
-
-  const expired = isExpired(proposal.endTime)
-  const canVote = isConnected && proposal.status === 'Active' && !expired
-
-  const myVote = publicKey
-    ? proposal.votes.find((v) => v.voter === publicKey)
-    : undefined
-
-  const handleVote = async (choice: VoteChoice) => {
-    await onVote(proposal.id, choice)
-  }
-
-  const voteButtons: { choice: VoteChoice; label: string; className: string }[] = [
-    {
-      choice: 'yes',
-      label: 'Yes',
-      className:
-        'bg-green-500/10 border-green-500/30 text-green-300 hover:bg-green-500/20 disabled:opacity-40',
-    },
-    {
-      choice: 'no',
-      label: 'No',
-      className:
-        'bg-red-500/10 border-red-500/30 text-red-300 hover:bg-red-500/20 disabled:opacity-40',
-    },
-    {
-      choice: 'abstain',
-      label: 'Abstain',
-      className:
-        'bg-gray-500/10 border-gray-500/30 text-gray-300 hover:bg-gray-500/20 disabled:opacity-40',
-    },
-  ]
-
-  return (
-    <div className="bg-gray-800/40 border border-gray-700/50 rounded-2xl overflow-hidden">
-      {/* Header */}
-      <div className="p-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
-          <div className="flex items-center gap-3 flex-wrap">
-            <span className="text-xs font-mono text-gray-500">#{proposal.id}</span>
-            {statusBadge(proposal.status)}
-            {expired && proposal.status === 'Active' && (
-              <span className="text-xs text-orange-400 font-medium">Period ended</span>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            className="text-gray-400 hover:text-white transition-colors self-start sm:self-auto"
-            aria-label={expanded ? 'Collapse' : 'Expand'}
-          >
-            {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-          </button>
-        </div>
-
-        <h3 className="text-lg font-bold text-white mb-1">{proposal.title || '(untitled)'}</h3>
-
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-400">
-          <span>
-            Amount:{' '}
-            <span className="text-white font-semibold">{formatAmount(proposal.amount)}</span>
-          </span>
-          <span>
-            Proposer:{' '}
-            <span className="font-mono text-gray-300">{truncate(proposal.proposer)}</span>
-          </span>
-          {!expired && proposal.status === 'Active' && (
-            <span className="flex items-center gap-1">
-              <Clock size={13} className="text-sky-400" />
-              Ends {new Date(proposal.endTime * 1000).toLocaleString()}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Vote tally — always visible */}
-      <div className="px-5 pb-4">
-        <VoteTally proposal={proposal} />
-      </div>
-
-      {/* Voting controls */}
-      {myVote ? (
-        <div className="px-5 pb-4 flex items-center gap-2 text-sm">
-          <CheckCircle size={15} className="text-green-400 shrink-0" />
-          <span className="text-gray-400">
-            You voted:{' '}
-            <span className="font-bold text-white capitalize">{myVote.choice}</span>
-          </span>
-        </div>
-      ) : canVote ? (
-        <div className="px-5 pb-4">
-          <p className="text-xs text-gray-500 mb-2">Cast your vote</p>
-          <div className="flex flex-wrap gap-2">
-            {voteButtons.map(({ choice, label, className }) => (
-              <button
-                key={choice}
-                type="button"
-                onClick={() => handleVote(choice)}
-                disabled={isVoting}
-                className={`flex items-center gap-1.5 px-4 py-2 rounded-xl border text-sm font-bold transition-all min-h-[40px] ${className}`}
-              >
-                {isVoting ? <Loader2 size={14} className="animate-spin" /> : null}
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : !isConnected && proposal.status === 'Active' && !expired ? (
-        <div className="px-5 pb-4 text-sm text-gray-500">Connect wallet to vote</div>
-      ) : null}
-
-      {/* Expanded details */}
-      {expanded && (
-        <div className="border-t border-gray-700/50 px-5 py-4 space-y-2 text-sm text-gray-400">
-          <div>
-            Recipient:{' '}
-            <span className="font-mono text-gray-300">{truncate(proposal.recipient, 8)}</span>
-          </div>
-          <div>
-            Token:{' '}
-            <span className="font-mono text-gray-300">{truncate(proposal.token, 8)}</span>
-          </div>
-          <div>
-            Start: {new Date(proposal.startTime * 1000).toLocaleString()}
-          </div>
-          <div>Total votes cast: {proposal.votes.length}</div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Page ──────────────────────────────────────────────────────────────────────
+const statCards = [
+  { label: "Total Proposals", value: "8", icon: Scale },
+  { label: "Active", value: "2", icon: Clock },
+  { label: "Quorum", value: "60%", icon: Users },
+  { label: "Members", value: "15", icon: Users },
+]
 
 export default function GovernancePage() {
-  const {
-    proposals,
-    config,
-    isLoading,
-    error,
-    isConnected,
-    publicKey,
-    vote,
-  } = useGovernance()
-
-  const [votingId, setVotingId] = useState<number | null>(null)
-  const [voteError, setVoteError] = useState<string | null>(null)
-
-  const handleVote = async (proposalId: number, choice: VoteChoice) => {
-    setVotingId(proposalId)
-    setVoteError(null)
-    try {
-      await vote(proposalId, choice)
-    } catch (err) {
-      setVoteError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setVotingId(null)
-    }
-  }
-
-  const activeCount    = proposals.filter((p) => p.status === 'Active').length
-  const approvedCount  = proposals.filter((p) => p.status === 'Approved').length
-  const executedCount  = proposals.filter((p) => p.status === 'Executed').length
+  const [open, setOpen] = useState(false)
+  const active = proposals.filter(p => p.status === "Active")
+  const past = proposals.filter(p => p.status !== "Active")
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">🗳️ Governance</h1>
-        <p className="text-gray-400">
-          Create budget proposals, vote Yes / No / Abstain, and execute approved fund
-          disbursements.
-        </p>
+    <div className="flex flex-col gap-6 p-6 pt-24 md:p-10">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-3xl font-semibold tracking-tight">Governance</h1>
+          <p className="text-muted-foreground">DAO proposals, weighted voting, on-chain execution</p>
+        </div>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger render={<Button><Plus data-icon="inline-start" />Create Proposal</Button>} />
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader><DialogTitle>Create Proposal</DialogTitle></DialogHeader>
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2"><label className="text-sm font-medium">Title</label><Input placeholder="Proposal title" maxLength={100} /></div>
+              <div className="flex flex-col gap-2"><label className="text-sm font-medium">Description</label><Textarea placeholder="Describe the proposal..." rows={3} maxLength={500} /></div>
+              <div className="flex flex-col gap-2"><label className="text-sm font-medium">Action Type</label>
+                <Select defaultValue="Funding"><SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="Funding">Funding</SelectItem><SelectItem value="PolicyChange">Policy Change</SelectItem><SelectItem value="General">General</SelectItem></SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-2"><label className="text-sm font-medium">Amount</label><Input placeholder="0.00" /></div>
+                <div className="flex flex-col gap-2"><label className="text-sm font-medium">Recipient</label><Input placeholder="G..." /></div>
+              </div>
+              <Button onClick={() => setOpen(false)}>Submit Proposal</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
 
-      {/* Config strip */}
-      {config && (
-        <div className="flex flex-wrap gap-4 mb-8 text-sm text-gray-400">
-          <span>
-            Quorum:{' '}
-            <span className="font-semibold text-white">{config.quorumPercentage}%</span>
-          </span>
-          <span>
-            Members:{' '}
-            <span className="font-semibold text-white">{config.memberCount}</span>
-          </span>
-          <span>
-            Voting window:{' '}
-            <span className="font-semibold text-white">
-              {Math.round(Number(config.votingDuration) / 3600)}h
-            </span>
-          </span>
-        </div>
-      )}
-
-      {/* Stats row */}
-      <div className="grid grid-cols-3 gap-3 mb-8">
-        {[
-          { label: 'Active',   count: activeCount,   color: 'text-sky-400' },
-          { label: 'Approved', count: approvedCount,  color: 'text-green-400' },
-          { label: 'Executed', count: executedCount,  color: 'text-purple-400' },
-        ].map(({ label, count, color }) => (
-          <div
-            key={label}
-            className="bg-gray-800/40 border border-gray-700/50 rounded-xl p-4 text-center"
-          >
-            <p className={`text-2xl font-black ${color}`}>{count}</p>
-            <p className="text-xs text-gray-500 mt-1">{label}</p>
-          </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {statCards.map(({ label, value, icon: Icon }) => (
+          <Card key={label} className="border">
+            <CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-medium">{label}</CardTitle><Icon className="text-muted-foreground" /></CardHeader>
+            <CardContent><p className="text-2xl font-semibold tracking-tight">{value}</p></CardContent>
+          </Card>
         ))}
       </div>
 
-      {/* Vote error */}
-      {voteError && (
-        <div className="mb-6 p-4 bg-red-900/40 border border-red-700/50 rounded-xl text-red-300 text-sm flex items-start gap-2">
-          <XCircle size={16} className="shrink-0 mt-0.5" />
-          {voteError}
+      <div>
+        <h2 className="mb-4 text-xl font-semibold">Active Proposals</h2>
+        <div className="flex flex-col gap-4">
+          {active.map((p) => (
+            <Card key={p.id} className="border">
+              <CardContent className="flex flex-col gap-4 p-6">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-sm">#{p.id}</span>
+                      <Badge variant="default">{p.status}</Badge>
+                      <Badge variant="outline">{p.action}</Badge>
+                    </div>
+                    <h3 className="text-lg font-semibold">{p.title}</h3>
+                    <p className="text-muted-foreground text-sm line-clamp-2">{p.description}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm"><ThumbsUp data-icon="inline-start" />Yes</Button>
+                    <Button size="sm" variant="outline"><ThumbsDown data-icon="inline-start" />No</Button>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-primary font-medium">{p.votesFor} Yes</span>
+                    <span className="text-muted-foreground text-xs">Quorum: {p.quorum}/{p.totalWeight}</span>
+                    <span className="text-destructive font-medium">{p.votesAgainst} No</span>
+                  </div>
+                  <Progress value={(p.votesFor / p.totalWeight) * 100} />
+                </div>
+                <div className="flex items-center gap-4 text-muted-foreground text-xs">
+                  <span className="flex items-center gap-1"><Users /> {p.totalWeight} weight</span>
+                  <span className="flex items-center gap-1"><Clock /> Ends {p.endTime}</span>
+                  {p.amount && <span>· {p.amount}</span>}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
         </div>
-      )}
+      </div>
 
-      {/* Loading */}
-      {isLoading && proposals.length === 0 && (
-        <div className="flex items-center justify-center py-16 text-gray-400 gap-3">
-          <Loader2 className="animate-spin" size={24} />
-          Loading proposals…
-        </div>
-      )}
-
-      {/* Error */}
-      {error && (
-        <div className="p-4 bg-red-900/40 border border-red-700/50 rounded-xl text-red-300 text-sm">
-          {error}
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!isLoading && proposals.length === 0 && !error && (
-        <div className="border border-dashed border-gray-600 rounded-xl p-12 text-center text-gray-500">
-          No proposals yet.
-          {!isConnected && ' Connect your wallet to create a proposal.'}
-        </div>
-      )}
-
-      {/* Proposal list */}
-      <div className="space-y-4">
-        {proposals.map((proposal) => (
-          <ProposalCard
-            key={proposal.id}
-            proposal={proposal}
-            publicKey={publicKey}
-            isConnected={isConnected}
-            onVote={handleVote}
-            isVoting={votingId === proposal.id}
-          />
-        ))}
+      <div>
+        <h2 className="mb-4 text-xl font-semibold">Past Proposals</h2>
+        <Card className="border"><CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>ID</TableHead><TableHead>Title</TableHead><TableHead>Status</TableHead><TableHead>Votes</TableHead></TableRow></TableHeader>
+          <TableBody>{past.map((p) => (<TableRow key={p.id}>
+            <TableCell className="font-mono text-sm">#{p.id}</TableCell>
+            <TableCell className="font-medium">{p.title}</TableCell>
+            <TableCell><Badge variant={p.status === "Approved" ? "default" : "secondary"}>{p.status}</Badge></TableCell>
+            <TableCell><span className="text-primary">{p.votesFor} Yes</span> / <span className="text-destructive">{p.votesAgainst} No</span></TableCell>
+          </TableRow>))}</TableBody></Table></CardContent></Card>
       </div>
     </div>
   )

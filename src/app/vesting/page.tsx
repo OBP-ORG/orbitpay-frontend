@@ -1,147 +1,118 @@
-'use client'
+"use client"
 
-import { VestingScheduleBuilder } from '@/components/VestingScheduleBuilder'
-import React, { useState } from 'react';
-import ClaimModal from '@/components/ClaimModal';
-import VestingTimeline from '@/components/VestingTimeline';
-import { CheckCircle2 } from 'lucide-react';
+import { useState } from "react"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Progress } from "@/components/ui/progress"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Clock, Plus, Lock, Unlock, Shield } from "lucide-react"
 
-interface MockSchedule {
-  id: number;
-  label: string;
-  total_amount: string;
-  vested_amount: string;
-  claimed_amount: string;
-  claimable_amount: string;
-  token: string;
-  status: string;
-  startTime: number;
-  cliffDuration: number;
-  totalDuration: number;
-  totalAmountBig: bigint;
-  vestedAmountBig: bigint;
-  claimedAmountBig: bigint;
-}
+const schedules = [
+  { id: "V-001", beneficiary: "GA...XYZ", label: "Team", totalAmount: "50,000 XLM", claimedAmount: "12,500", cliff: "90 days", duration: "365 days", revocable: true, status: "Active" },
+  { id: "V-002", beneficiary: "GB...ABC", label: "Advisor", totalAmount: "15,000 XLM", claimedAmount: "0", cliff: "180 days", duration: "365 days", revocable: false, status: "Active" },
+  { id: "V-003", beneficiary: "GC...DEF", label: "Seed", totalAmount: "100,000 XLM", claimedAmount: "100,000", cliff: "365 days", duration: "730 days", revocable: false, status: "FullyClaimed" },
+]
 
-const MOCK_SCHEDULES: MockSchedule[] = [
-  {
-    id: 1,
-    label: "Team Allocation",
-    total_amount: "10,000",
-    vested_amount: "6,000",
-    claimed_amount: "2,000",
-    claimable_amount: "4,000",
-    token: "ORBT",
-    status: "Active",
-    startTime: Math.floor(Date.now() / 1000) - 3600 * 24 * 365, // 1 year ago
-    cliffDuration: 3600 * 24 * 365, // 1 year
-    totalDuration: 3600 * 24 * 365 * 4, // 4 years
-    totalAmountBig: BigInt(100000000000),
-    vestedAmountBig: BigInt(60000000000),
-    claimedAmountBig: BigInt(20000000000),
-  },
-  {
-    id: 2,
-    label: "Advisor Grant",
-    total_amount: "5,000",
-    vested_amount: "0",
-    claimed_amount: "0",
-    claimable_amount: "0",
-    token: "ORBT",
-    status: "Cliff Period",
-    startTime: Math.floor(Date.now() / 1000) - 3600 * 24 * 30, // 30 days ago
-    cliffDuration: 3600 * 24 * 180, // 6 months
-    totalDuration: 3600 * 24 * 365 * 2, // 2 years
-    totalAmountBig: BigInt(50000000000),
-    vestedAmountBig: BigInt(0),
-    claimedAmountBig: BigInt(0),
-  }
-];
+const statCards = [
+  { label: "Total Locked", value: "165,000 XLM", icon: Lock },
+  { label: "Active", value: "2", icon: Clock },
+  { label: "Fully Vested", value: "1", icon: Unlock },
+  { label: "Claimed", value: "112,500 XLM", icon: Shield },
+]
 
 export default function VestingPage() {
-  const [selectedScheduleId, setSelectedScheduleId] = useState<number | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [open, setOpen] = useState(false)
 
-  const handleClaimSuccess = (amount: string) => {
-    setSelectedScheduleId(null);
-    setSuccessMessage(`Successfully claimed ${amount} tokens!`);
-    setTimeout(() => setSuccessMessage(null), 5000);
-  };
-
-	return (
-		<div className="max-w-6xl mx-auto p-8">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">⏳ Token Vesting</h1>
-          <p className="text-gray-400 mt-2">
-            Manage your vested token allocations and claim rewards.
-          </p>
+  return (
+    <div className="flex flex-col gap-6 p-6 pt-24 md:p-10">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-3xl font-semibold tracking-tight">Token Vesting</h1>
+          <p className="text-muted-foreground">Cliff + linear vesting schedules on Stellar</p>
         </div>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger render={<Button><Plus data-icon="inline-start" />Create Schedule</Button>} />
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader><DialogTitle>Create Vesting Schedule</DialogTitle></DialogHeader>
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2"><label className="text-sm font-medium">Beneficiary</label><Input placeholder="G..." /></div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-2"><label className="text-sm font-medium">Total Amount</label><Input placeholder="0.00" /></div>
+                <div className="flex flex-col gap-2"><label className="text-sm font-medium">Token</label><Input placeholder="XLM" /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-2"><label className="text-sm font-medium">Cliff (days)</label><Input placeholder="90" /></div>
+                <div className="flex flex-col gap-2"><label className="text-sm font-medium">Duration (days)</label><Input placeholder="365" /></div>
+              </div>
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-medium">Label</label>
+                <Select defaultValue="Team"><SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="Team">Team</SelectItem><SelectItem value="Advisor">Advisor</SelectItem><SelectItem value="Seed">Seed</SelectItem><SelectItem value="Custom">Custom</SelectItem></SelectContent>
+                </Select>
+              </div>
+              <Button onClick={() => setOpen(false)}>Create Schedule</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
 
-      {successMessage && (
-        <div className="mb-6 bg-green-900/20 border border-green-500/50 rounded-xl p-4 flex items-center gap-3 animate-in slide-in-from-top duration-300">
-          <CheckCircle2 className="text-green-500" size={24} />
-          <p className="text-green-100 font-medium">{successMessage}</p>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {MOCK_SCHEDULES.map((schedule) => (
-          <div key={schedule.id} className="bg-gray-900 border border-gray-800 rounded-2xl p-6 hover:border-purple-500/30 transition-all group">
-            <div className="flex justify-between items-start mb-4">
-              <div>
-                <h3 className="text-lg font-bold text-white group-hover:text-purple-400 transition-colors">{schedule.label}</h3>
-                <span className={`text-[10px] uppercase font-bold px-2 py-1 rounded ${schedule.status === 'Active' ? 'bg-green-900/30 text-green-500' : 'bg-orange-900/30 text-orange-500'
-                  }`}>
-                  {schedule.status}
-                </span>
-              </div>
-              <div className="text-right">
-                <p className="text-2xl font-black text-white">{schedule.total_amount}</p>
-                <p className="text-xs text-gray-500 uppercase">{schedule.token}</p>
-              </div>
-            </div>
-
-            <div className="space-y-6">
-              <VestingTimeline
-                startTime={schedule.startTime}
-                cliffDuration={schedule.cliffDuration}
-                totalDuration={schedule.totalDuration}
-                totalAmount={schedule.totalAmountBig}
-                vestedAmount={schedule.vestedAmountBig}
-                claimedAmount={schedule.claimedAmountBig}
-              />
-
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Claimable</span>
-                <span className="text-purple-400 font-bold">{schedule.claimable_amount} {schedule.token}</span>
-              </div>
-
-              <button
-                onClick={() => setSelectedScheduleId(schedule.id)}
-                className="w-full py-3 bg-gray-800 hover:bg-purple-600 text-white font-bold rounded-xl transition-all shadow-lg shadow-purple-900/10"
-              >
-                View & Claim
-              </button>
-            </div>
-          </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {statCards.map(({ label, value, icon: Icon }) => (
+          <Card key={label} className="border">
+            <CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-sm font-medium">{label}</CardTitle><Icon className="text-muted-foreground" /></CardHeader>
+            <CardContent><p className="text-2xl font-semibold tracking-tight">{value}</p></CardContent>
+          </Card>
         ))}
       </div>
 
-      {/* Empty State Mock */}
-      <div className="mt-12 border border-dashed border-gray-800 rounded-2xl p-12 text-center">
-        <p className="text-gray-600">No more vesting schedules found for your address.</p>
-      </div>
+      <Tabs defaultValue="active" className="flex flex-col gap-4">
+        <TabsList><TabsTrigger value="active">Active</TabsTrigger><TabsTrigger value="all">All Schedules</TabsTrigger></TabsList>
 
-      {selectedScheduleId !== null && (
-        <ClaimModal
-          schedule_id={selectedScheduleId}
-          isOpen={true}
-          onClose={() => setSelectedScheduleId(null)}
-          onSuccess={handleClaimSuccess}
-        />
-      )}
-		</div>
-		);
+        <TabsContent value="active" className="flex flex-col gap-4">
+          {schedules.filter(s => s.status === "Active").map((s) => {
+            const pct = Math.round((parseInt(s.claimedAmount.replace(/,/g,"")) / parseInt(s.totalAmount.replace(/,/g,""))) * 100)
+            return (
+              <Card key={s.id} className="border">
+                <CardContent className="flex flex-col gap-4 p-6">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-sm">{s.id}</span>
+                        <Badge>{s.label}</Badge>
+                        {s.revocable ? <Badge variant="outline">Revocable</Badge> : <Badge variant="secondary">Locked</Badge>}
+                      </div>
+                      <p className="text-muted-foreground text-sm">{s.beneficiary} · {s.totalAmount}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="outline"><Unlock data-icon="inline-start" />Claim</Button>
+                      {s.revocable && <Button size="sm" variant="ghost" className="text-destructive">Revoke</Button>}
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between text-sm"><span className="text-muted-foreground">Vested</span><span>{pct}%</span></div>
+                    <Progress value={pct} />
+                  </div>
+                  <div className="flex items-center gap-4 text-muted-foreground text-xs"><span>Cliff: {s.cliff}</span><span>·</span><span>Duration: {s.duration}</span><span>·</span><span>{s.claimedAmount} claimed</span></div>
+                </CardContent>
+              </Card>
+            )
+          })}
+        </TabsContent>
+
+        <TabsContent value="all">
+          <Card className="border"><CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Schedule</TableHead><TableHead>Beneficiary</TableHead><TableHead>Amount</TableHead><TableHead>Label</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
+            <TableBody>{schedules.map((s) => (<TableRow key={s.id}>
+              <TableCell className="font-mono text-sm">{s.id}</TableCell><TableCell>{s.beneficiary}</TableCell><TableCell>{s.totalAmount}</TableCell>
+              <TableCell><Badge variant="outline">{s.label}</Badge></TableCell>
+              <TableCell><Badge variant={s.status === "Active" ? "default" : "secondary"}>{s.status}</Badge></TableCell>
+            </TableRow>))}</TableBody></Table></CardContent></Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
 }
