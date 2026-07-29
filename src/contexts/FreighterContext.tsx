@@ -7,8 +7,15 @@ import {
   isAllowed,
   isConnected,
   requestAccess,
+  signTransaction as freighterSignTransaction,
 } from "@stellar/freighter-api"
 import { EXPECTED_NETWORK_PASSPHRASE } from "@/lib/domain"
+
+/** Matches `contract.ClientOptions["signTransaction"]` from `@stellar/stellar-sdk`. */
+export type SignTransaction = (
+  tx: string,
+  opts?: { network?: string; networkPassphrase?: string; accountToSign?: string },
+) => Promise<string>
 
 /**
  * Wallet connection lifecycle (issue #12). Every state a consumer needs to
@@ -48,6 +55,8 @@ interface WalletState extends WalletSnapshot {
   isFreighterInstalled: boolean
   connect: () => Promise<void>
   disconnect: () => void
+  /** Bound to the connected wallet; pass straight through to `contract.Client` options. */
+  signTransaction: SignTransaction
 }
 
 const NOT_YET_DETECTED_STATUSES: readonly WalletStatus[] = ["checking", "not-installed"]
@@ -244,6 +253,17 @@ export function createFreighterStore() {
     setSnapshot({ status: "locked", address: null, network: null, networkPassphrase: null, error: null })
   }
 
+  function signTransaction(
+    tx: string,
+    opts?: { network?: string; networkPassphrase?: string; accountToSign?: string },
+  ): Promise<string> {
+    return freighterSignTransaction(tx, {
+      networkPassphrase: EXPECTED_NETWORK_PASSPHRASE,
+      accountToSign: snapshot.address ?? undefined,
+      ...opts,
+    })
+  }
+
   function subscribe(listener: () => void): () => void {
     listeners.add(listener)
     start()
@@ -261,12 +281,14 @@ export function createFreighterStore() {
     return INITIAL_SNAPSHOT
   }
 
-  return { subscribe, getSnapshot, getServerSnapshot, connect, disconnect }
+  return { subscribe, getSnapshot, getServerSnapshot, connect, disconnect, signTransaction }
 }
 
 export type FreighterStore = ReturnType<typeof createFreighterStore>
 
 const freighterStore = createFreighterStore()
+
+const NOOP_SIGN: SignTransaction = () => Promise.reject(new Error("No wallet connected"))
 
 const FreighterContext = createContext<WalletState>({
   ...INITIAL_SNAPSHOT,
@@ -274,6 +296,7 @@ const FreighterContext = createContext<WalletState>({
   isFreighterInstalled: false,
   connect: async () => {},
   disconnect: () => {},
+  signTransaction: NOOP_SIGN,
 })
 
 export function useFreighter() {
@@ -296,8 +319,9 @@ export function FreighterProvider({
       isFreighterInstalled: !NOT_YET_DETECTED_STATUSES.includes(snapshot.status),
       connect: store.connect,
       disconnect: store.disconnect,
+      signTransaction: store.signTransaction,
     }),
-    [snapshot, store]
+    [snapshot, store],
   )
 
   return <FreighterContext.Provider value={value}>{children}</FreighterContext.Provider>
