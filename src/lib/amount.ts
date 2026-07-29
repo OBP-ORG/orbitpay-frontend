@@ -17,7 +17,7 @@ import { validateBaseUnitAmount } from "./validation";
  * @example
  * formatBaseUnit("12500000", 7) → "1.25"
  * formatBaseUnit("12500000", 7, "XLM") → "1.25 XLM"
- * formatBaseUnit("1000000000", 7, "USDC") → "100.00 USDC"
+ * formatBaseUnit("1000000000", 7, "USDC") → "100 USDC"
  *
  * Uses integer arithmetic — never floating-point.
  */
