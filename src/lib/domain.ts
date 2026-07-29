@@ -56,6 +56,15 @@ export const STELLAR_NETWORK_PASSPHRASES = {
   mainnet: "Public Global Stellar Network ; September 2015",
 } as const;
 
+/**
+ * The network this app operates on (matches the Horizon/RPC endpoints
+ * pinned in `lib/orbitpay.ts`). A connected wallet must be on this network
+ * — enforced by comparing passphrases, the unambiguous source of truth for
+ * Stellar network identity, not Freighter's free-form network name string.
+ */
+export const EXPECTED_NETWORK: StellarNetwork = "testnet";
+export const EXPECTED_NETWORK_PASSPHRASE = STELLAR_NETWORK_PASSPHRASES[EXPECTED_NETWORK];
+
 // ── Protocol Statuses ───────────────────────────────────────────────────────
 
 export type StreamStatus = "Active" | "Paused" | "Cancelled" | "Completed";
