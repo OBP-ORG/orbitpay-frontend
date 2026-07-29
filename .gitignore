@@ -1,6 +1,7 @@
 # Build artifacts
 target/
 *.wasm
+*.tsbuildinfo
 
 # Dependencies
 node_modules/
