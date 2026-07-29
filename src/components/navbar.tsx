@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
-import { Menu, Send, Wallet, LogOut, ExternalLink } from "lucide-react"
+import { Menu, Send, Wallet, LogOut, ExternalLink, AlertTriangle } from "lucide-react"
 import { useFreighter } from "@/contexts/FreighterContext"
 
 const navLinks = [
@@ -22,36 +22,54 @@ function formatAddress(addr: string) {
 
 export default function Navbar() {
   const pathname = usePathname()
-  const { address, isConnected, isConnecting, isFreighterInstalled, error, connect, disconnect } = useFreighter()
+  const { status, address, network, error, connect, disconnect } = useFreighter()
 
   const walletButton = () => {
-    if (!isFreighterInstalled) {
-      return (
-        <Button size="sm" variant="outline" render={<a href="https://freighter.app" target="_blank" rel="noopener noreferrer" />} nativeButton={false}>
-          <ExternalLink data-icon="inline-start" />
-          Install Freighter
-        </Button>
-      )
-    }
-    if (isConnecting) {
-      return <Button size="sm" disabled>Connecting...</Button>
-    }
-    if (isConnected && address) {
-      return (
-        <div className="flex items-center gap-2">
-          <Badge variant="secondary" className="font-mono text-xs">{formatAddress(address)}</Badge>
-          <Button size="sm" variant="ghost" onClick={disconnect}>
-            <LogOut data-icon="inline-start" />
+    switch (status) {
+      case "checking":
+        // Avoid flashing "Install Freighter" or "Connect Wallet" before
+        // detection resolves (also true during SSR, so this is what the
+        // server renders — no hydration mismatch).
+        return <Button size="sm" variant="outline" disabled>Loading wallet...</Button>
+
+      case "not-installed":
+        return (
+          <Button size="sm" variant="outline" render={<a href="https://freighter.app" target="_blank" rel="noopener noreferrer" />} nativeButton={false}>
+            <ExternalLink data-icon="inline-start" />
+            Install Freighter
           </Button>
-        </div>
-      )
+        )
+
+      case "connecting":
+        return <Button size="sm" disabled>Connecting...</Button>
+
+      case "wrong-network":
+        return (
+          <Button size="sm" variant="outline" className="text-destructive" onClick={disconnect}>
+            <AlertTriangle data-icon="inline-start" />
+            Wrong Network{network ? ` (${network})` : ""}
+          </Button>
+        )
+
+      case "connected":
+        return (
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary" className="font-mono text-xs">{formatAddress(address!)}</Badge>
+            <Button size="sm" variant="ghost" onClick={disconnect}>
+              <LogOut data-icon="inline-start" />
+            </Button>
+          </div>
+        )
+
+      case "locked":
+      case "denied":
+        return (
+          <Button size="sm" onClick={connect}>
+            <Wallet data-icon="inline-start" />
+            Connect Wallet
+          </Button>
+        )
     }
-    return (
-      <Button size="sm" onClick={connect}>
-        <Wallet data-icon="inline-start" />
-        Connect Wallet
-      </Button>
-    )
   }
 
   return (
