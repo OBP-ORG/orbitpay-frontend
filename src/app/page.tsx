@@ -11,22 +11,65 @@ import {
   Users,
   ArrowRight,
   RefreshCw,
+  AlertTriangle,
 } from "lucide-react"
 import Link from "next/link"
 import { useFreighter } from "@/contexts/FreighterContext"
 import { useDashboard } from "@/hooks/useDashboard"
 
+/** Small inline error affordance for a single metric card / widget. */
+function WidgetError({ message }: { message: string }) {
+  return (
+    <span
+      className="flex items-center gap-1 text-sm text-destructive"
+      title={message}
+    >
+      <AlertTriangle className="size-4" /> Failed to load
+    </span>
+  )
+}
+
 export default function DashboardPage() {
   const { address, isConnected } = useFreighter()
-  const { metrics, activity, loading, error, refresh } = useDashboard(address)
+  const { balance, payments, staticMetrics, isInitialLoading, refresh } =
+    useDashboard(address)
+
+  const isRefreshing = balance.isFetching || payments.isFetching
 
   const metricCards = [
-    { label: "Treasury Balance", value: metrics.treasuryBalance, icon: Landmark },
-    { label: "Active Streams", value: String(metrics.activeStreams), icon: ArrowRightLeft },
-    { label: "Vesting Schedules", value: String(metrics.vestingSchedules), icon: Clock },
-    { label: "Active Proposals", value: String(metrics.activeProposals), icon: Scale },
-    { label: "Employees", value: String(metrics.employees), icon: Users },
-  ]
+    {
+      label: "Treasury Balance",
+      icon: Landmark,
+      widget: balance,
+      value: balance.data,
+    },
+    {
+      label: "Active Streams",
+      icon: ArrowRightLeft,
+      widget: null,
+      value: String(staticMetrics.activeStreams),
+    },
+    {
+      label: "Vesting Schedules",
+      icon: Clock,
+      widget: null,
+      value: String(staticMetrics.vestingSchedules),
+    },
+    {
+      label: "Active Proposals",
+      icon: Scale,
+      widget: null,
+      value: String(staticMetrics.activeProposals),
+    },
+    {
+      label: "Employees",
+      icon: Users,
+      widget: payments,
+      value: payments.data ? String(payments.data.employees) : undefined,
+    },
+  ] as const
+
+  const activity = payments.data?.activity ?? []
 
   return (
     <div className="flex flex-col gap-8 p-6 pt-24 md:p-10">
@@ -37,10 +80,10 @@ export default function DashboardPage() {
             variant="ghost"
             size="icon"
             onClick={refresh}
-            disabled={loading}
+            disabled={isRefreshing}
             aria-label="Refresh dashboard data"
           >
-            <RefreshCw className={loading ? "animate-spin" : ""} />
+            <RefreshCw className={isRefreshing ? "animate-spin" : ""} />
           </Button>
         </div>
         <p className="text-muted-foreground">
@@ -50,23 +93,23 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {error && (
-        <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
-          {error}
-        </div>
-      )}
-
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        {metricCards.map(({ label, value, icon: Icon }) => (
+        {metricCards.map(({ label, value, icon: Icon, widget }) => (
           <Card key={label} className="border">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">{label}</CardTitle>
               <Icon className="text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-semibold tracking-tight">
-                {loading && !value ? "..." : value}
-              </p>
+              {widget?.isError && !widget.data ? (
+                <WidgetError message={widget.error?.message ?? "Unknown error"} />
+              ) : (
+                <p className="text-2xl font-semibold tracking-tight">
+                  {widget?.isInitialLoading || (!widget && isInitialLoading)
+                    ? "..."
+                    : (value ?? "—")}
+                </p>
+              )}
             </CardContent>
           </Card>
         ))}
@@ -81,6 +124,11 @@ export default function DashboardPage() {
             </Button>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
+            {payments.isError && !payments.data && (
+              <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+                {payments.error?.message ?? "Failed to load recent activity."}
+              </div>
+            )}
             {activity.map((item) => (
               <div key={item.detail} className="flex items-center justify-between gap-4">
                 <div className="flex flex-col gap-0.5">
@@ -103,7 +151,7 @@ export default function DashboardPage() {
                 </div>
               </div>
             ))}
-            {!loading && activity.length === 0 && (
+            {!payments.isInitialLoading && !payments.isError && activity.length === 0 && (
               <p className="text-muted-foreground text-sm py-4 text-center">
                 No recent activity to display.
               </p>

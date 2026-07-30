@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Navbar from "@/components/navbar";
 import { FreighterProvider } from "@/contexts/FreighterContext";
+import { QueryProvider } from "@/contexts/QueryProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -50,10 +51,12 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-full flex flex-col bg-background">
-        <FreighterProvider>
-          <Navbar />
-          <main className="flex-1">{children}</main>
-        </FreighterProvider>
+        <QueryProvider>
+          <FreighterProvider>
+            <Navbar />
+            <main className="flex-1">{children}</main>
+          </FreighterProvider>
+        </QueryProvider>
       </body>
     </html>
   );
