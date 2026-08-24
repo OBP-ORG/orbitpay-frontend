@@ -1,17 +1,21 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useFreighter } from "@/contexts/FreighterContext"
 import {
   approveWithdrawal,
+  checkWithdrawalPolicy,
   executeWithdrawal,
   getTreasuryConfig,
   getWithdrawal,
+  isAuthorizedSigner,
   isTreasuryConfigured,
+  isWithdrawalPolicyStale,
   proposeWithdrawal,
   type TreasuryConfigView,
   type WithdrawalView,
 } from "@/lib/soroban/treasury"
+import { POLICY_ERROR_MESSAGES } from "@/lib/soroban/errors"
 import type { LifecycleStage } from "@/lib/soroban/txLifecycle"
 import { TREASURY_CONTRACT_ID } from "@/lib/soroban/config"
 
@@ -58,6 +62,23 @@ export function useTreasury() {
   const setAction = useCallback((key: string, state: ActionState) => {
     setActions((prev) => ({ ...prev, [key]: state }))
   }, [])
+
+  /**
+   * A propose/approve/execute result (success or error) belongs to the
+   * wallet that signed it. If the connected account changes — the user
+   * switches accounts in Freighter — any in-progress or just-finished action
+   * banner from the previous account must not linger and read as if it
+   * applies to the new one, so this state is cleared on every account
+   * change (a signature from account A is never optimistically attributed
+   * to account B).
+   */
+  const prevAddressRef = useRef(address)
+  useEffect(() => {
+    if (prevAddressRef.current !== address) {
+      prevAddressRef.current = address
+      setActions({})
+    }
+  }, [address])
 
   const refreshConfig = useCallback(async () => {
     if (!configured) return
@@ -122,6 +143,13 @@ export function useTreasury() {
     async (args: { recipient: string; amount: bigint; memo: string }) => {
       if (!address) return
       const key = "propose"
+      if (config) {
+        const violation = checkWithdrawalPolicy(config, address, args.amount)
+        if (violation) {
+          setAction(key, { stage: "error", message: violation })
+          return
+        }
+      }
       const onStage = (stage: LifecycleStage) => setAction(key, { stage, message: null })
       const result = await proposeWithdrawal(
         { publicKey: address, signTransaction },
@@ -135,13 +163,21 @@ export function useTreasury() {
         setAction(key, { stage: "error", message: result.message })
       }
     },
-    [address, signTransaction, setAction, trackId],
+    [address, config, signTransaction, setAction, trackId],
   )
 
   const approve = useCallback(
     async (id: number) => {
       if (!address) return
       const key = `approve-${id}`
+      if (config?.paused) {
+        setAction(key, { stage: "error", message: POLICY_ERROR_MESSAGES.paused })
+        return
+      }
+      if (config && !isAuthorizedSigner(config, address)) {
+        setAction(key, { stage: "error", message: POLICY_ERROR_MESSAGES.unauthorized })
+        return
+      }
       const onStage = (stage: LifecycleStage) => setAction(key, { stage, message: null })
       const result = await approveWithdrawal({ publicKey: address, signTransaction }, id, onStage)
       if (result.status === "success") {
@@ -151,13 +187,21 @@ export function useTreasury() {
         setAction(key, { stage: "error", message: result.message })
       }
     },
-    [address, signTransaction, setAction, refreshWithdrawal],
+    [address, config, signTransaction, setAction, refreshWithdrawal],
   )
 
   const execute = useCallback(
     async (id: number) => {
       if (!address) return
       const key = `execute-${id}`
+      if (config?.paused) {
+        setAction(key, { stage: "error", message: POLICY_ERROR_MESSAGES.paused })
+        return
+      }
+      if (config && !isAuthorizedSigner(config, address)) {
+        setAction(key, { stage: "error", message: POLICY_ERROR_MESSAGES.unauthorized })
+        return
+      }
       const onStage = (stage: LifecycleStage) => setAction(key, { stage, message: null })
       const result = await executeWithdrawal({ publicKey: address, signTransaction }, id, onStage)
       if (result.status === "success") {
@@ -167,7 +211,7 @@ export function useTreasury() {
         setAction(key, { stage: "error", message: result.message })
       }
     },
-    [address, signTransaction, setAction, refreshWithdrawal],
+    [address, config, signTransaction, setAction, refreshWithdrawal],
   )
 
   const actionState = useCallback((key: string): ActionState => actions[key] ?? IDLE_ACTION, [actions])
@@ -179,6 +223,33 @@ export function useTreasury() {
   const executedWithdrawals = useMemo(
     () => knownIds.map((id) => withdrawals[id]).filter((w): w is WithdrawalView => !!w && w.executed),
     [knownIds, withdrawals],
+  )
+
+  /** Always evaluated against the withdrawal's own frozen threshold (a chain
+   * read), never the treasury's *current* config threshold — see
+   * `isWithdrawalPolicyStale` doc for why those can diverge. */
+  const isWithdrawalMet = useCallback(
+    (w: WithdrawalView) => w.approvals.length >= w.threshold,
+    [],
+  )
+
+  const isWithdrawalStale = useCallback(
+    (w: WithdrawalView) => (config ? isWithdrawalPolicyStale(config, w) : false),
+    [config],
+  )
+
+  const isSigner = useMemo(
+    () => (config && address ? isAuthorizedSigner(config, address) : false),
+    [config, address],
+  )
+
+  const checkProposalPolicy = useCallback(
+    (amount: bigint): string | null => {
+      if (!address) return "Connect a wallet to propose a withdrawal."
+      if (!config) return null
+      return checkWithdrawalPolicy(config, address, amount)
+    },
+    [address, config],
   )
 
   return {
@@ -197,5 +268,9 @@ export function useTreasury() {
     trackId,
     refresh: refreshAll,
     currentSigner: address,
+    isSigner,
+    isWithdrawalMet,
+    isWithdrawalStale,
+    checkProposalPolicy,
   }
 }
