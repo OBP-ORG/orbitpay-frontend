@@ -16,6 +16,7 @@ import type { contract } from "@stellar/stellar-sdk";
 import { getTreasuryClient, type WalletSigner } from "./client";
 import { runInvocation, type LifecycleResult } from "./txLifecycle";
 import { isTreasuryConfigured } from "./config";
+import { POLICY_ERROR_MESSAGES } from "./errors";
 
 export interface TreasuryConfigView {
   admin: string;
@@ -93,4 +94,40 @@ export async function executeWithdrawal(
     () => c.execute_withdrawal({ id }) as Promise<contract.AssembledTransaction<void>>,
     onStage,
   );
+}
+
+/** Whether `address` is one of the treasury's configured multi-sig signers. */
+export function isAuthorizedSigner(config: TreasuryConfigView, address: string): boolean {
+  return config.signers.includes(address);
+}
+
+/**
+ * Client-side policy preflight for proposing a withdrawal, run against the
+ * live treasury config *before* a transaction is built/simulated — so an
+ * unauthorized signer, a paused treasury, or an amount the treasury can't
+ * cover is explained immediately rather than surfacing only after a wasted
+ * simulation round-trip. Returns `null` when the proposal is policy-clean;
+ * the contract's own checks (via `errors.ts`) remain the final authority.
+ */
+export function checkWithdrawalPolicy(
+  config: TreasuryConfigView,
+  signerAddress: string,
+  amount: bigint,
+): string | null {
+  if (config.paused) return POLICY_ERROR_MESSAGES.paused;
+  if (!isAuthorizedSigner(config, signerAddress)) return POLICY_ERROR_MESSAGES.unauthorized;
+  if (amount > config.balance) return POLICY_ERROR_MESSAGES.insufficientBalance;
+  return null;
+}
+
+/**
+ * Whether the treasury's signer threshold has changed since `withdrawal` was
+ * proposed. `withdrawal.threshold` is a chain-read snapshot of the threshold
+ * that applied at proposal time; comparing it against the *live* config
+ * (also a chain read) — rather than assuming either one alone still governs
+ * — is what lets approve/execute be guarded by current contract state
+ * instead of a stale local assumption.
+ */
+export function isWithdrawalPolicyStale(config: TreasuryConfigView, withdrawal: WithdrawalView): boolean {
+  return config.threshold !== withdrawal.threshold;
 }
