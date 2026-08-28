@@ -1,5 +1,8 @@
 # Testing Strategy
 
+The wallet transaction strategy is documented in [ADR 0002](docs/adr/0002-wallet-transaction-testing.md).
+Run `npm run test:wallet-poc` to execute the safe, ephemeral Stellar testnet proof.
+
 _Spike: [#11](https://github.com/OBP-ORG/orbitpay-frontend/issues/11) — decision note and PoC._
 
 ## Recommendation
