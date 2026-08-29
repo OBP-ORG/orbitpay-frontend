@@ -12,9 +12,11 @@
 import { contract } from "@stellar/stellar-sdk";
 import {
   GOVERNANCE_CONTRACT_ID,
+  PAYROLL_CONTRACT_ID,
   SOROBAN_NETWORK_PASSPHRASE,
   SOROBAN_RPC_URL,
   TREASURY_CONTRACT_ID,
+  VESTING_CONTRACT_ID,
 } from "./config";
 import type { SignTransaction } from "@/contexts/FreighterContext";
 
@@ -40,4 +42,12 @@ export function getTreasuryClient(signer: WalletSigner | null): Promise<contract
 
 export function getGovernanceClient(signer: WalletSigner | null): Promise<contract.Client> {
   return contract.Client.from(buildClientOptions(GOVERNANCE_CONTRACT_ID, signer));
+}
+
+export function getPayrollClient(signer: WalletSigner | null): Promise<contract.Client> {
+  return contract.Client.from(buildClientOptions(PAYROLL_CONTRACT_ID, signer));
+}
+
+export function getVestingClient(signer: WalletSigner | null): Promise<contract.Client> {
+  return contract.Client.from(buildClientOptions(VESTING_CONTRACT_ID, signer));
 }

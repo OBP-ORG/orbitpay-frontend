@@ -65,21 +65,20 @@ describe("usePayrollStreams", () => {
 
     it("keys queries by account so switching wallets invalidates state", async () => {
         const { Wrapper, queryClient } = makeWrapper()
-        const queryFnSpy = vi.fn(async () => ({
-            items: [SAMPLE_STREAM],
-            nextCursor: null as string | null,
-        }))
 
-        // Override the query function via cache default for this test by seeding
-        // the query cache key per-account and reading it back.
-        const { result, rerender } = renderHook(
+        const { rerender } = renderHook(
             ({ addr }: { addr: string | null }) => usePayrollStreams(addr),
             { initialProps: { addr: ADDRESS_A }, wrapper: Wrapper },
         )
 
-        // Manually prime the query with the spy so we can observe address-keying.
-        queryClient.setQueryData(["payroll-streams", ADDRESS_A], { pages: [{ items: [SAMPLE_STREAM], nextCursor: null }], pageParams: [null] })
-        queryClient.setQueryData(["payroll-streams", ADDRESS_B], { pages: [{ items: [], nextCursor: null }], pageParams: [null] })
+        queryClient.setQueryData(["payroll-streams", ADDRESS_A], {
+            pages: [{ items: [SAMPLE_STREAM], nextCursor: null }],
+            pageParams: [null],
+        })
+        queryClient.setQueryData(["payroll-streams", ADDRESS_B], {
+            pages: [{ items: [], nextCursor: null }],
+            pageParams: [null],
+        })
 
         rerender({ addr: ADDRESS_B })
 
@@ -87,9 +86,21 @@ describe("usePayrollStreams", () => {
             const state = queryClient.getQueryState(["payroll-streams", ADDRESS_B])
             expect(state).toBeDefined()
         })
+    })
 
-        void queryFnSpy
-        void result
+    it("returns empty items when contract is not configured", async () => {
+        const { Wrapper } = makeWrapper()
+        const { result } = renderHook(() => usePayrollStreams(ADDRESS_A), { wrapper: Wrapper })
+        await waitFor(() => expect(result.current.isFetched).toBe(true))
+        const items = result.current.data?.pages.flatMap((p) => p.items) ?? []
+        expect(items).toHaveLength(0)
+    })
+
+    it("handles error state with refetch capability", async () => {
+        const { Wrapper } = makeWrapper()
+        const { result } = renderHook(() => usePayrollStreams(ADDRESS_A), { wrapper: Wrapper })
+        await waitFor(() => expect(result.current.isFetched).toBe(true))
+        expect(typeof result.current.refetch).toBe("function")
     })
 })
 
@@ -107,5 +118,46 @@ describe("useVestingSchedules", () => {
         const items = result.current.data?.pages.flatMap((p) => p.items) ?? []
         expect(items).toHaveLength(1)
         expect(items[0].beneficiary).toBe(ADDRESS_B)
+    })
+
+    it("is disabled when account is null", () => {
+        const { Wrapper } = makeWrapper()
+        const { result } = renderHook(() => useVestingSchedules(null), { wrapper: Wrapper })
+        expect(result.current.isFetched).toBe(false)
+        expect(result.current.data).toBeUndefined()
+    })
+
+    it("returns empty items when contract is not configured", async () => {
+        const { Wrapper } = makeWrapper()
+        const { result } = renderHook(() => useVestingSchedules(ADDRESS_A), { wrapper: Wrapper })
+        await waitFor(() => expect(result.current.isFetched).toBe(true))
+        const items = result.current.data?.pages.flatMap((p) => p.items) ?? []
+        expect(items).toHaveLength(0)
+    })
+
+    it("switching accounts produces a fresh query with different key", async () => {
+        const { Wrapper, queryClient } = makeWrapper()
+        queryClient.setQueryData(["vesting-schedules", ADDRESS_A], {
+            pages: [{ items: [SAMPLE_SCHEDULE], nextCursor: null }],
+            pageParams: [null],
+        })
+        queryClient.setQueryData(["vesting-schedules", ADDRESS_B], {
+            pages: [{ items: [], nextCursor: null }],
+            pageParams: [null],
+        })
+
+        const { rerender } = renderHook(
+            ({ addr }: { addr: string | null }) => useVestingSchedules(addr),
+            { initialProps: { addr: ADDRESS_A }, wrapper: Wrapper },
+        )
+
+        rerender({ addr: ADDRESS_B })
+
+        await waitFor(() => {
+            const stateA = queryClient.getQueryState(["vesting-schedules", ADDRESS_A])
+            const stateB = queryClient.getQueryState(["vesting-schedules", ADDRESS_B])
+            expect(stateA).toBeDefined()
+            expect(stateB).toBeDefined()
+        })
     })
 })

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useFreighter } from "@/contexts/FreighterContext"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -9,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
+import { PayrollStreamList } from "@/components/PayrollStreamList"
 import { ArrowRightLeft, Plus, Clock, CheckCircle, XCircle, Send } from "lucide-react"
 
 const streams = [
@@ -19,6 +21,7 @@ const streams = [
 
 export default function PayrollPage() {
   const [open, setOpen] = useState(false)
+  const { address } = useFreighter()
 
   return (
     <div className="flex flex-col gap-6 p-6 pt-24 md:p-10">
@@ -60,6 +63,8 @@ export default function PayrollPage() {
           </Card>
         ))}
       </div>
+
+      <PayrollStreamList account={address ?? null} />
 
       <Tabs defaultValue="active" className="flex flex-col gap-4">
         <TabsList><TabsTrigger value="active">Active Streams</TabsTrigger><TabsTrigger value="all">All Streams</TabsTrigger></TabsList>

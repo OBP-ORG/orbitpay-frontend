@@ -23,6 +23,8 @@ export const SOROBAN_RPC_URL =
 
 export const TREASURY_CONTRACT_ID = process.env.NEXT_PUBLIC_TREASURY_CONTRACT_ID ?? "";
 export const GOVERNANCE_CONTRACT_ID = process.env.NEXT_PUBLIC_GOVERNANCE_CONTRACT_ID ?? "";
+export const PAYROLL_CONTRACT_ID = process.env.NEXT_PUBLIC_PAYROLL_CONTRACT_ID ?? "";
+export const VESTING_CONTRACT_ID = process.env.NEXT_PUBLIC_VESTING_CONTRACT_ID ?? "";
 
 export function isTreasuryConfigured(): boolean {
   return TREASURY_CONTRACT_ID.length > 0;
@@ -30,4 +32,12 @@ export function isTreasuryConfigured(): boolean {
 
 export function isGovernanceConfigured(): boolean {
   return GOVERNANCE_CONTRACT_ID.length > 0;
+}
+
+export function isPayrollConfigured(): boolean {
+  return PAYROLL_CONTRACT_ID.length > 0;
+}
+
+export function isVestingConfigured(): boolean {
+  return VESTING_CONTRACT_ID.length > 0;
 }

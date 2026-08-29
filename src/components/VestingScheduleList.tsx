@@ -5,7 +5,7 @@ import { useVestingSchedules, type VestingSchedule } from "@/hooks/use-payroll-s
 import { formatAmount, formatAddress } from "@/lib/format"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Loader2, ChevronRight } from "lucide-react"
+import { AlertCircle, ChevronRight, Loader2 } from "lucide-react"
 
 /**
  * Paginated list of vesting schedules for an account (issue #26).
@@ -15,6 +15,9 @@ export function VestingScheduleList({ account }: { account: string | null }) {
         data,
         isPending,
         isFetching,
+        isError,
+        error,
+        refetch,
         fetchNextPage,
         hasNextPage,
         isFetchingNextPage,
@@ -29,6 +32,19 @@ export function VestingScheduleList({ account }: { account: string | null }) {
         return (
             <div className="text-center text-muted-foreground py-8">
                 Connect wallet to view schedules
+            </div>
+        )
+    }
+
+    if (isError) {
+        return (
+            <div className="rounded-xl border border-border bg-card p-6 text-center space-y-3">
+                <AlertCircle className="h-8 w-8 text-destructive mx-auto" />
+                <p className="text-sm text-destructive font-medium">Failed to load vesting schedules</p>
+                <p className="text-xs text-muted-foreground">{error?.message ?? "Unknown error"}</p>
+                <Button variant="outline" size="sm" onClick={() => refetch()}>
+                    Retry
+                </Button>
             </div>
         )
     }

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useFreighter } from "@/contexts/FreighterContext"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -10,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { VestingScheduleList } from "@/components/VestingScheduleList"
 import { Clock, Plus, Lock, Unlock, Shield } from "lucide-react"
 
 const schedules = [
@@ -27,6 +29,7 @@ const statCards = [
 
 export default function VestingPage() {
   const [open, setOpen] = useState(false)
+  const { address } = useFreighter()
 
   return (
     <div className="flex flex-col gap-6 p-6 pt-24 md:p-10">
@@ -69,6 +72,8 @@ export default function VestingPage() {
           </Card>
         ))}
       </div>
+
+      <VestingScheduleList account={address ?? null} />
 
       <Tabs defaultValue="active" className="flex flex-col gap-4">
         <TabsList><TabsTrigger value="active">Active</TabsTrigger><TabsTrigger value="all">All Schedules</TabsTrigger></TabsList>
