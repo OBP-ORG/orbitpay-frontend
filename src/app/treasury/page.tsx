@@ -15,6 +15,7 @@ import { useTreasury } from "@/hooks/useTreasury"
 import { TxStatusBanner } from "@/components/tx-status-banner"
 import { isStellarAddress } from "@/lib/validation"
 import { stroopsToXLM, xlmToStroops } from "@/lib/amount"
+import { NATIVE_TOKEN_CONTRACT_ID } from "@/lib/soroban/config"
 
 export default function TreasuryPage() {
   const { isConnected, address } = useFreighter()
@@ -23,6 +24,7 @@ export default function TreasuryPage() {
   const [trackIdInput, setTrackIdInput] = useState("")
   const [form, setForm] = useState({ recipient: "", amount: "", memo: "" })
   const [formError, setFormError] = useState<string | null>(null)
+  const [checkingPolicy, setCheckingPolicy] = useState(false)
 
   if (!treasury.configured) {
     return (
@@ -61,19 +63,26 @@ export default function TreasuryPage() {
       setFormError("Amount must be greater than zero")
       return
     }
-    // Policy prerequisites (paused / authorized signer / sufficient balance)
-    // are checked against the live treasury config before a transaction is
-    // ever built or simulated — see `checkWithdrawalPolicy`.
-    const policyViolation = treasury.checkProposalPolicy(amount)
+    // Policy prerequisites (paused / authorized signer / sufficient live
+    // balance for this specific asset) are checked before a transaction is
+    // ever built or simulated — see `checkWithdrawalAuthorization` and
+    // `checkSufficientBalance` in lib/soroban/treasury.ts.
+    setCheckingPolicy(true)
+    const policyViolation = await treasury.checkProposalPolicy(NATIVE_TOKEN_CONTRACT_ID, amount)
+    setCheckingPolicy(false)
     if (policyViolation) {
       setFormError(policyViolation)
       return
     }
-    await treasury.propose({ recipient: form.recipient, amount, memo: form.memo })
+    await treasury.propose({ token: NATIVE_TOKEN_CONTRACT_ID, recipient: form.recipient, amount, memo: form.memo })
   }
 
   const stats = [
-    { label: "Balance", value: treasury.config ? stroopsToXLM(String(treasury.config.balance)) : "…", icon: Landmark },
+    {
+      label: "Balance",
+      value: treasury.balance !== null ? stroopsToXLM(String(treasury.balance)) : treasury.balanceError ? "—" : "…",
+      icon: Landmark,
+    },
     {
       label: "Threshold",
       value: treasury.config ? `${treasury.config.threshold} of ${treasury.config.signers.length}` : "…",
@@ -113,6 +122,7 @@ export default function TreasuryPage() {
         </div>
       )}
       {treasury.configError && <TxStatusBanner stage="error" errorMessage={treasury.configError} />}
+      {treasury.balanceError && <TxStatusBanner stage="error" errorMessage={treasury.balanceError} />}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map(({ label, value, icon: Icon }) => (
@@ -152,7 +162,10 @@ export default function TreasuryPage() {
               </div>
               {formError && <TxStatusBanner stage="error" errorMessage={formError} />}
               <TxStatusBanner stage={proposeAction.stage} errorMessage={proposeAction.message} successMessage={proposeAction.message} />
-              <Button onClick={submitWithdrawal} disabled={proposeAction.stage !== null && proposeAction.stage !== "success" && proposeAction.stage !== "error"}>
+              <Button
+                onClick={submitWithdrawal}
+                disabled={checkingPolicy || (proposeAction.stage !== null && proposeAction.stage !== "success" && proposeAction.stage !== "error")}
+              >
                 Submit Proposal
               </Button>
             </div>

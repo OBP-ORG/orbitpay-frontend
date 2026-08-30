@@ -4,6 +4,7 @@ import { useFreighter } from "@/contexts/FreighterContext"
 import {
   approveWithdrawal,
   executeWithdrawal,
+  getTokenBalance,
   getTreasuryConfig,
   getWithdrawal,
   proposeWithdrawal,
@@ -22,6 +23,7 @@ vi.mock("@/lib/soroban/treasury", async () => {
     ...actual,
     getTreasuryConfig: vi.fn(),
     getWithdrawal: vi.fn(),
+    getTokenBalance: vi.fn(),
     proposeWithdrawal: vi.fn(),
     approveWithdrawal: vi.fn(),
     executeWithdrawal: vi.fn(),
@@ -32,6 +34,7 @@ vi.mock("@/lib/soroban/treasury", async () => {
 const mockUseFreighter = vi.mocked(useFreighter)
 const mockGetTreasuryConfig = vi.mocked(getTreasuryConfig)
 const mockGetWithdrawal = vi.mocked(getWithdrawal)
+const mockGetTokenBalance = vi.mocked(getTokenBalance)
 const mockProposeWithdrawal = vi.mocked(proposeWithdrawal)
 const mockApproveWithdrawal = vi.mocked(approveWithdrawal)
 const mockExecuteWithdrawal = vi.mocked(executeWithdrawal)
@@ -39,6 +42,7 @@ const mockExecuteWithdrawal = vi.mocked(executeWithdrawal)
 const SIGNER_A = "GAAA1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 const SIGNER_B = "GBBB1BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
 const RECIPIENT = "GDDD1DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+const TOKEN = "CAAA1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
 function freighterAs(address: string | null) {
   mockUseFreighter.mockReturnValue({
@@ -60,7 +64,6 @@ function config(overrides: Partial<TreasuryConfigView> = {}): TreasuryConfigView
     admin: SIGNER_A,
     signers: [SIGNER_A, SIGNER_B],
     threshold: 1,
-    balance: BigInt(1_000_000),
     paused: false,
     ...overrides,
   }
@@ -71,6 +74,7 @@ function withdrawal(overrides: Partial<WithdrawalView> = {}): WithdrawalView {
     id: 1,
     proposer: SIGNER_A,
     recipient: RECIPIENT,
+    token: TOKEN,
     amount: BigInt(100),
     memo: "payout",
     approvals: [],
@@ -85,11 +89,13 @@ beforeEach(() => {
   window.localStorage.clear()
   mockGetTreasuryConfig.mockReset()
   mockGetWithdrawal.mockReset()
+  mockGetTokenBalance.mockReset()
   mockProposeWithdrawal.mockReset()
   mockApproveWithdrawal.mockReset()
   mockExecuteWithdrawal.mockReset()
   mockUseFreighter.mockReset()
   mockGetTreasuryConfig.mockResolvedValue({ status: "success", hash: "", result: config() })
+  mockGetTokenBalance.mockResolvedValue({ status: "success", hash: "", result: BigInt(1_000_000) })
 })
 
 afterEach(() => {
@@ -108,8 +114,14 @@ describe("useTreasury: one-signer path", () => {
     await waitFor(() => expect(result.current.config?.threshold).toBe(1))
 
     await act(async () => {
-      await result.current.propose({ recipient: RECIPIENT, amount: BigInt(100), memo: "payout" })
+      await result.current.propose({ token: TOKEN, recipient: RECIPIENT, amount: BigInt(100), memo: "payout" })
     })
+
+    expect(mockProposeWithdrawal).toHaveBeenCalledWith(
+      expect.objectContaining({ publicKey: SIGNER_A }),
+      { token: TOKEN, recipient: RECIPIENT, amount: BigInt(100), memo: "payout" },
+      expect.any(Function),
+    )
 
     await waitFor(() => expect(result.current.withdrawals[1]).toBeDefined())
     expect(result.current.isWithdrawalMet(result.current.withdrawals[1])).toBe(false)
@@ -125,6 +137,11 @@ describe("useTreasury: one-signer path", () => {
       await result.current.approve(1)
     })
 
+    expect(mockApproveWithdrawal).toHaveBeenCalledWith(
+      expect.objectContaining({ publicKey: SIGNER_A }),
+      1,
+      expect.any(Function),
+    )
     await waitFor(() => expect(result.current.isWithdrawalMet(result.current.withdrawals[1])).toBe(true))
   })
 })
@@ -172,9 +189,14 @@ describe("useTreasury: failure paths", () => {
     await waitFor(() => expect(result.current.config?.paused).toBe(true))
 
     await act(async () => {
-      await result.current.propose({ recipient: RECIPIENT, amount: BigInt(100), memo: "payout" })
+      await result.current.propose({ token: TOKEN, recipient: RECIPIENT, amount: BigInt(100), memo: "payout" })
     })
 
+    // The paused check short-circuits before a live balance read is ever
+    // requested *for this proposal* (the hook may separately fetch a
+    // balance on mount for the stats tile — that's unrelated).
+    const balanceCallsForThisToken = mockGetTokenBalance.mock.calls.filter(([token]) => token === TOKEN)
+    expect(balanceCallsForThisToken).toHaveLength(0)
     expect(mockProposeWithdrawal).not.toHaveBeenCalled()
     expect(result.current.actionState("propose").stage).toBe("error")
     expect(result.current.actionState("propose").message).toMatch(/paused/i)
@@ -190,11 +212,28 @@ describe("useTreasury: failure paths", () => {
     expect(result.current.isSigner).toBe(false)
 
     await act(async () => {
-      await result.current.propose({ recipient: RECIPIENT, amount: BigInt(100), memo: "payout" })
+      await result.current.propose({ token: TOKEN, recipient: RECIPIENT, amount: BigInt(100), memo: "payout" })
     })
 
     expect(mockProposeWithdrawal).not.toHaveBeenCalled()
     expect(result.current.actionState("propose").message).toMatch(/not authorized/i)
+  })
+
+  it("surfaces an insufficient-balance violation from a live per-token read, without ever calling the contract", async () => {
+    freighterAs(SIGNER_A)
+    mockGetTreasuryConfig.mockResolvedValue({ status: "success", hash: "", result: config({ threshold: 1 }) })
+    mockGetTokenBalance.mockResolvedValue({ status: "success", hash: "", result: BigInt(50) })
+
+    const { result } = renderHook(() => useTreasury())
+    await waitFor(() => expect(result.current.config).not.toBeNull())
+
+    await act(async () => {
+      await result.current.propose({ token: TOKEN, recipient: RECIPIENT, amount: BigInt(100), memo: "payout" })
+    })
+
+    expect(mockGetTokenBalance).toHaveBeenCalledWith(TOKEN)
+    expect(mockProposeWithdrawal).not.toHaveBeenCalled()
+    expect(result.current.actionState("propose").message).toMatch(/insufficient|balance/i)
   })
 
   it("does not optimistically mark an approval recorded when the contract call fails", async () => {
@@ -238,7 +277,7 @@ describe("useTreasury: account-change path", () => {
     expect(result.current.isSigner).toBe(true)
 
     await act(async () => {
-      await result.current.propose({ recipient: RECIPIENT, amount: BigInt(100), memo: "payout" })
+      await result.current.propose({ token: TOKEN, recipient: RECIPIENT, amount: BigInt(100), memo: "payout" })
     })
     expect(result.current.actionState("propose").stage).toBe("success")
 

@@ -1,28 +1,38 @@
 /**
  * Treasury contract write/read wrappers, built on the shared tx lifecycle.
  *
- * Method and argument names below (`propose_withdrawal`, `recipient`, …)
- * follow this repo's STYLE.md Rust naming conventions (`snake_case` public
- * functions) and the shape described in issue #8 / the treasury page's
- * existing mock data (multi-sig withdrawal proposals with a signer
- * threshold, pause switch, and per-withdrawal timelock). No treasury
- * contract is deployed/checked into this repo yet to confirm these against a
- * live spec — once one is, this is the single place to align method/arg
- * names if they differ; every caller goes through these functions rather
- * than naming the contract method inline.
+ * Method and argument names below are the deployed treasury contract's real
+ * interface, confirmed against maintainer review on issue #29's PR:
+ *
+ *   - `create_withdrawal(proposer, token, recipient, amount, memo) -> u32`
+ *   - `approve_withdrawal(signer, proposal_id)`
+ *   - `execute_withdrawal(executor, proposal_id)`
+ *   - `get_config()` — does NOT include a balance field.
+ *
+ * `get_withdrawal(id)`'s shape wasn't disputed, so it's unchanged. Every
+ * caller goes through these functions rather than naming a contract method
+ * inline, so if the deployed spec shifts again this is the one place to
+ * realign — and `treasury.integration.test.ts` builds each of these wrappers
+ * against a hand-authored `contract.Spec` fixture matching this interface,
+ * so an argument-shape drift like the one this module doc used to hide fails
+ * a test instead of only failing silently against a live deployment.
+ *
+ * Since `get_config` carries no balance, "does this withdrawal fit the
+ * treasury's funds" is answered by a *separate* live read of the withdrawal
+ * asset's own SEP-41 `balance(id)` — see `getTokenBalance` — against the
+ * treasury contract's own address, not a field on the config struct.
  */
 
 import type { contract } from "@stellar/stellar-sdk";
-import { getTreasuryClient, type WalletSigner } from "./client";
+import { getTokenClient, getTreasuryClient, type WalletSigner } from "./client";
 import { runInvocation, type LifecycleResult } from "./txLifecycle";
-import { isTreasuryConfigured } from "./config";
+import { isTreasuryConfigured, TREASURY_CONTRACT_ID } from "./config";
 import { POLICY_ERROR_MESSAGES } from "./errors";
 
 export interface TreasuryConfigView {
   admin: string;
   signers: string[];
   threshold: number;
-  balance: bigint;
   paused: boolean;
 }
 
@@ -30,6 +40,8 @@ export interface WithdrawalView {
   id: number;
   proposer: string;
   recipient: string;
+  /** SEP-41 token contract ID this withdrawal pays out in. */
+  token: string;
   amount: bigint;
   memo: string;
   approvals: string[];
@@ -60,14 +72,37 @@ export async function getWithdrawal(id: number): Promise<LifecycleResult<Withdra
   );
 }
 
+/**
+ * Live SEP-41 balance read: `balance(id) -> i128`, called against whichever
+ * token contract the withdrawal is denominated in, for the address holding
+ * the funds (the treasury contract itself). This is a plain read — no
+ * signer needed — same as `getTreasuryConfig`/`getWithdrawal`.
+ */
+export async function getTokenBalance(
+  tokenContractId: string,
+  holder: string = TREASURY_CONTRACT_ID,
+): Promise<LifecycleResult<bigint>> {
+  const c = (await getTokenClient(tokenContractId, null)) as DynamicClient;
+  return runInvocation(
+    () => c.balance({ id: holder }) as Promise<contract.AssembledTransaction<bigint>>,
+  );
+}
+
 export async function proposeWithdrawal(
   signer: WalletSigner,
-  args: { recipient: string; amount: bigint; memo: string },
+  args: { token: string; recipient: string; amount: bigint; memo: string },
   onStage?: Parameters<typeof runInvocation>[1],
 ): Promise<LifecycleResult<number>> {
   const c = (await client(signer)) as DynamicClient;
   return runInvocation(
-    () => c.propose_withdrawal(args) as Promise<contract.AssembledTransaction<number>>,
+    () =>
+      c.create_withdrawal({
+        proposer: signer.publicKey,
+        token: args.token,
+        recipient: args.recipient,
+        amount: args.amount,
+        memo: args.memo,
+      }) as Promise<contract.AssembledTransaction<number>>,
     onStage,
   );
 }
@@ -79,7 +114,10 @@ export async function approveWithdrawal(
 ): Promise<LifecycleResult<void>> {
   const c = (await client(signer)) as DynamicClient;
   return runInvocation(
-    () => c.approve_withdrawal({ id }) as Promise<contract.AssembledTransaction<void>>,
+    () =>
+      c.approve_withdrawal({ signer: signer.publicKey, proposal_id: id }) as Promise<
+        contract.AssembledTransaction<void>
+      >,
     onStage,
   );
 }
@@ -91,7 +129,10 @@ export async function executeWithdrawal(
 ): Promise<LifecycleResult<void>> {
   const c = (await client(signer)) as DynamicClient;
   return runInvocation(
-    () => c.execute_withdrawal({ id }) as Promise<contract.AssembledTransaction<void>>,
+    () =>
+      c.execute_withdrawal({ executor: signer.publicKey, proposal_id: id }) as Promise<
+        contract.AssembledTransaction<void>
+      >,
     onStage,
   );
 }
@@ -102,22 +143,32 @@ export function isAuthorizedSigner(config: TreasuryConfigView, address: string):
 }
 
 /**
- * Client-side policy preflight for proposing a withdrawal, run against the
- * live treasury config *before* a transaction is built/simulated — so an
- * unauthorized signer, a paused treasury, or an amount the treasury can't
- * cover is explained immediately rather than surfacing only after a wasted
- * simulation round-trip. Returns `null` when the proposal is policy-clean;
- * the contract's own checks (via `errors.ts`) remain the final authority.
+ * Client-side authorization preflight for proposing/approving/executing a
+ * withdrawal, run against the live treasury config *before* a transaction is
+ * built/simulated — so a paused treasury or an unauthorized signer is
+ * explained immediately rather than surfacing only after a wasted simulation
+ * round-trip. Returns `null` when clean; the contract's own checks (via
+ * `errors.ts`) remain the final authority. Doesn't check balance — `get_config`
+ * carries none — see `checkSufficientBalance` for that, backed by a live
+ * per-token read via `getTokenBalance`.
  */
-export function checkWithdrawalPolicy(
+export function checkWithdrawalAuthorization(
   config: TreasuryConfigView,
   signerAddress: string,
-  amount: bigint,
 ): string | null {
   if (config.paused) return POLICY_ERROR_MESSAGES.paused;
   if (!isAuthorizedSigner(config, signerAddress)) return POLICY_ERROR_MESSAGES.unauthorized;
-  if (amount > config.balance) return POLICY_ERROR_MESSAGES.insufficientBalance;
   return null;
+}
+
+/**
+ * Pure comparison against a balance already read live (via
+ * `getTokenBalance`) for the withdrawal's specific asset — kept separate from
+ * the read itself so the read stays async/network-bound while this stays a
+ * plain, synchronously-testable check.
+ */
+export function checkSufficientBalance(balance: bigint, amount: bigint): string | null {
+  return amount > balance ? POLICY_ERROR_MESSAGES.insufficientBalance : null;
 }
 
 /**

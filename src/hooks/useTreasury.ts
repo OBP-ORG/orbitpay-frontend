@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useFreighter } from "@/contexts/FreighterContext"
 import {
   approveWithdrawal,
-  checkWithdrawalPolicy,
+  checkSufficientBalance,
+  checkWithdrawalAuthorization,
   executeWithdrawal,
+  getTokenBalance,
   getTreasuryConfig,
   getWithdrawal,
   isAuthorizedSigner,
@@ -15,9 +17,8 @@ import {
   type TreasuryConfigView,
   type WithdrawalView,
 } from "@/lib/soroban/treasury"
-import { POLICY_ERROR_MESSAGES } from "@/lib/soroban/errors"
 import type { LifecycleStage } from "@/lib/soroban/txLifecycle"
-import { TREASURY_CONTRACT_ID } from "@/lib/soroban/config"
+import { NATIVE_TOKEN_CONTRACT_ID, TREASURY_CONTRACT_ID } from "@/lib/soroban/config"
 
 const KNOWN_IDS_STORAGE_KEY = `orbitpay:treasury:known-withdrawal-ids:${TREASURY_CONTRACT_ID}`
 
@@ -52,6 +53,19 @@ export function useTreasury() {
   const [config, setConfig] = useState<TreasuryConfigView | null>(null)
   const [configError, setConfigError] = useState<string | null>(null)
   const [configLoading, setConfigLoading] = useState(false)
+
+  /**
+   * `get_config` carries no balance field (the contract's real spec — see
+   * `treasury.ts` module doc), so the treasury's funds are read live and
+   * separately, per asset, straight from that asset's own SEP-41 token
+   * contract. Only one asset's balance is tracked here (native XLM, the
+   * only asset this UI currently proposes withdrawals in — see
+   * `NATIVE_TOKEN_CONTRACT_ID`'s doc) but `refreshBalance`/`getTokenBalance`
+   * underneath already take any token contract ID.
+   */
+  const [balance, setBalance] = useState<bigint | null>(null)
+  const [balanceError, setBalanceError] = useState<string | null>(null)
+  const [balanceLoading, setBalanceLoading] = useState(false)
 
   const [knownIds, setKnownIds] = useState<number[]>([])
   const [withdrawals, setWithdrawals] = useState<Record<number, WithdrawalView>>({})
@@ -93,6 +107,19 @@ export function useTreasury() {
     setConfigLoading(false)
   }, [configured])
 
+  const refreshBalance = useCallback(async (token: string = NATIVE_TOKEN_CONTRACT_ID) => {
+    if (!configured) return
+    setBalanceLoading(true)
+    setBalanceError(null)
+    const result = await getTokenBalance(token)
+    if (result.status === "success") {
+      setBalance(result.result)
+    } else {
+      setBalanceError(result.message)
+    }
+    setBalanceLoading(false)
+  }, [configured])
+
   const refreshWithdrawal = useCallback(
     async (id: number) => {
       const result = await getWithdrawal(id)
@@ -112,8 +139,9 @@ export function useTreasury() {
 
   const refreshAll = useCallback(() => {
     void refreshConfig()
+    void refreshBalance()
     knownIds.forEach((id) => void refreshWithdrawal(id))
-  }, [refreshConfig, refreshWithdrawal, knownIds])
+  }, [refreshConfig, refreshBalance, refreshWithdrawal, knownIds])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time hydration of persisted state on mount
@@ -124,7 +152,8 @@ export function useTreasury() {
     if (!configured) return
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data fetch on mount, standard pattern
     void refreshConfig()
-  }, [configured, refreshConfig])
+    void refreshBalance()
+  }, [configured, refreshConfig, refreshBalance])
 
   useEffect(() => {
     knownIds.forEach((id) => void refreshWithdrawal(id))
@@ -139,16 +168,36 @@ export function useTreasury() {
     })
   }, [])
 
+  /**
+   * Authorization (paused / not-a-signer) is checked synchronously against
+   * the already-fetched config; sufficiency is checked against a *live*
+   * per-token balance read fetched fresh for this specific call, since the
+   * asset being withdrawn — and thus the balance that matters — is only
+   * known once the caller picks it, and the config carries no balance to
+   * fall back on at all (see `treasury.ts` module doc).
+   */
+  const checkProposalPolicy = useCallback(
+    async (token: string, amount: bigint): Promise<string | null> => {
+      if (!address) return "Connect a wallet to propose a withdrawal."
+      if (config) {
+        const authError = checkWithdrawalAuthorization(config, address)
+        if (authError) return authError
+      }
+      const balanceResult = await getTokenBalance(token)
+      if (balanceResult.status !== "success") return balanceResult.message
+      return checkSufficientBalance(balanceResult.result, amount)
+    },
+    [address, config],
+  )
+
   const propose = useCallback(
-    async (args: { recipient: string; amount: bigint; memo: string }) => {
+    async (args: { token: string; recipient: string; amount: bigint; memo: string }) => {
       if (!address) return
       const key = "propose"
-      if (config) {
-        const violation = checkWithdrawalPolicy(config, address, args.amount)
-        if (violation) {
-          setAction(key, { stage: "error", message: violation })
-          return
-        }
+      const violation = await checkProposalPolicy(args.token, args.amount)
+      if (violation) {
+        setAction(key, { stage: "error", message: violation })
+        return
       }
       const onStage = (stage: LifecycleStage) => setAction(key, { stage, message: null })
       const result = await proposeWithdrawal(
@@ -163,19 +212,16 @@ export function useTreasury() {
         setAction(key, { stage: "error", message: result.message })
       }
     },
-    [address, config, signTransaction, setAction, trackId],
+    [address, checkProposalPolicy, signTransaction, setAction, trackId],
   )
 
   const approve = useCallback(
     async (id: number) => {
       if (!address) return
       const key = `approve-${id}`
-      if (config?.paused) {
-        setAction(key, { stage: "error", message: POLICY_ERROR_MESSAGES.paused })
-        return
-      }
-      if (config && !isAuthorizedSigner(config, address)) {
-        setAction(key, { stage: "error", message: POLICY_ERROR_MESSAGES.unauthorized })
+      const authError = config && checkWithdrawalAuthorization(config, address)
+      if (authError) {
+        setAction(key, { stage: "error", message: authError })
         return
       }
       const onStage = (stage: LifecycleStage) => setAction(key, { stage, message: null })
@@ -194,12 +240,9 @@ export function useTreasury() {
     async (id: number) => {
       if (!address) return
       const key = `execute-${id}`
-      if (config?.paused) {
-        setAction(key, { stage: "error", message: POLICY_ERROR_MESSAGES.paused })
-        return
-      }
-      if (config && !isAuthorizedSigner(config, address)) {
-        setAction(key, { stage: "error", message: POLICY_ERROR_MESSAGES.unauthorized })
+      const authError = config && checkWithdrawalAuthorization(config, address)
+      if (authError) {
+        setAction(key, { stage: "error", message: authError })
         return
       }
       const onStage = (stage: LifecycleStage) => setAction(key, { stage, message: null })
@@ -243,20 +286,15 @@ export function useTreasury() {
     [config, address],
   )
 
-  const checkProposalPolicy = useCallback(
-    (amount: bigint): string | null => {
-      if (!address) return "Connect a wallet to propose a withdrawal."
-      if (!config) return null
-      return checkWithdrawalPolicy(config, address, amount)
-    },
-    [address, config],
-  )
-
   return {
     configured,
     config,
     configError,
     configLoading,
+    balance,
+    balanceError,
+    balanceLoading,
+    refreshBalance,
     withdrawals,
     withdrawalErrors,
     pendingWithdrawals,

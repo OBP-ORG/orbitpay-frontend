@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  checkWithdrawalPolicy,
+  checkSufficientBalance,
+  checkWithdrawalAuthorization,
   isAuthorizedSigner,
   isWithdrawalPolicyStale,
   type TreasuryConfigView,
@@ -12,13 +13,13 @@ const SIGNER_A = "GAAA1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const SIGNER_B = "GBBB1BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
 const NON_SIGNER = "GCCC1CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
 const RECIPIENT = "GDDD1DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD";
+const TOKEN = "CAAA1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 function makeConfig(overrides: Partial<TreasuryConfigView> = {}): TreasuryConfigView {
   return {
     admin: SIGNER_A,
     signers: [SIGNER_A, SIGNER_B],
     threshold: 2,
-    balance: BigInt(1_000_000),
     paused: false,
     ...overrides,
   };
@@ -29,6 +30,7 @@ function makeWithdrawal(overrides: Partial<WithdrawalView> = {}): WithdrawalView
     id: 1,
     proposer: SIGNER_A,
     recipient: RECIPIENT,
+    token: TOKEN,
     amount: BigInt(100),
     memo: "payout",
     approvals: [],
@@ -49,22 +51,28 @@ describe("isAuthorizedSigner", () => {
   });
 });
 
-describe("checkWithdrawalPolicy", () => {
-  it("returns null (no violation) for an authorized signer within balance on an active treasury", () => {
-    expect(checkWithdrawalPolicy(makeConfig(), SIGNER_A, BigInt(500))).toBeNull();
+describe("checkWithdrawalAuthorization", () => {
+  it("returns null (no violation) for an authorized signer on an active treasury", () => {
+    expect(checkWithdrawalAuthorization(makeConfig(), SIGNER_A)).toBeNull();
   });
 
-  it("flags a paused treasury before any other check", () => {
+  it("flags a paused treasury before the signer check", () => {
     const config = makeConfig({ paused: true });
-    expect(checkWithdrawalPolicy(config, NON_SIGNER, BigInt(9_999_999))).toBe(POLICY_ERROR_MESSAGES.paused);
+    expect(checkWithdrawalAuthorization(config, NON_SIGNER)).toBe(POLICY_ERROR_MESSAGES.paused);
   });
 
   it("flags an address that is not an authorized signer", () => {
-    expect(checkWithdrawalPolicy(makeConfig(), NON_SIGNER, BigInt(500))).toBe(POLICY_ERROR_MESSAGES.unauthorized);
+    expect(checkWithdrawalAuthorization(makeConfig(), NON_SIGNER)).toBe(POLICY_ERROR_MESSAGES.unauthorized);
+  });
+});
+
+describe("checkSufficientBalance", () => {
+  it("returns null when the amount is within the live balance", () => {
+    expect(checkSufficientBalance(BigInt(1_000_000), BigInt(500))).toBeNull();
   });
 
-  it("flags an amount that exceeds the treasury's balance", () => {
-    expect(checkWithdrawalPolicy(makeConfig(), SIGNER_A, BigInt(2_000_000))).toBe(
+  it("flags an amount that exceeds the live balance", () => {
+    expect(checkSufficientBalance(BigInt(1_000_000), BigInt(2_000_000))).toBe(
       POLICY_ERROR_MESSAGES.insufficientBalance,
     );
   });

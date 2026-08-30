@@ -41,3 +41,8 @@ export function getTreasuryClient(signer: WalletSigner | null): Promise<contract
 export function getGovernanceClient(signer: WalletSigner | null): Promise<contract.Client> {
   return contract.Client.from(buildClientOptions(GOVERNANCE_CONTRACT_ID, signer));
 }
+
+/** Any SEP-41 token contract (native XLM's Stellar Asset Contract or otherwise). */
+export function getTokenClient(tokenContractId: string, signer: WalletSigner | null): Promise<contract.Client> {
+  return contract.Client.from(buildClientOptions(tokenContractId, signer));
+}
