@@ -14,7 +14,6 @@ import {
   isTreasuryConfigured,
   isWithdrawalPolicyStale,
   proposeWithdrawal,
-  type TreasuryConfigView,
   type WithdrawalView,
 } from "@/lib/soroban/treasury"
 import type { LifecycleStage } from "@/lib/soroban/txLifecycle"
@@ -46,8 +45,16 @@ export interface ActionState {
 
 const IDLE_ACTION: ActionState = { stage: null, message: null }
 
+/** Account-specific keys prevent a previous wallet's reads from becoming the current wallet's UI. */
+export const treasuryKeys = {
+  all: ["orbitpay", "treasury"] as const,
+  config: (address: string | null) => [...treasuryKeys.all, "config", address] as const,
+  withdrawal: (address: string | null, id: number) => [...treasuryKeys.all, "withdrawal", address, id] as const,
+}
+
 export function useTreasury() {
   const { address, signTransaction } = useFreighter()
+  const queryClient = useQueryClient()
   const configured = isTreasuryConfigured()
 
   const [config, setConfig] = useState<TreasuryConfigView | null>(null)
@@ -68,9 +75,6 @@ export function useTreasury() {
   const [balanceLoading, setBalanceLoading] = useState(false)
 
   const [knownIds, setKnownIds] = useState<number[]>([])
-  const [withdrawals, setWithdrawals] = useState<Record<number, WithdrawalView>>({})
-  const [withdrawalErrors, setWithdrawalErrors] = useState<Record<number, string>>({})
-
   const [actions, setActions] = useState<Record<string, ActionState>>({})
 
   const setAction = useCallback((key: string, state: ActionState) => {
@@ -166,7 +170,7 @@ export function useTreasury() {
       saveKnownIds(next)
       return next
     })
-  }, [])
+  }, [setKnownIds])
 
   /**
    * Authorization (paused / not-a-signer) is checked synchronously against
@@ -228,7 +232,7 @@ export function useTreasury() {
       const result = await approveWithdrawal({ publicKey: address, signTransaction }, id, onStage)
       if (result.status === "success") {
         setAction(key, { stage: "success", message: "Approval recorded." })
-        void refreshWithdrawal(id)
+        void queryClient.invalidateQueries({ queryKey: treasuryKeys.withdrawal(address, id) })
       } else {
         setAction(key, { stage: "error", message: result.message })
       }
@@ -249,7 +253,8 @@ export function useTreasury() {
       const result = await executeWithdrawal({ publicKey: address, signTransaction }, id, onStage)
       if (result.status === "success") {
         setAction(key, { stage: "success", message: "Withdrawal executed." })
-        void refreshWithdrawal(id)
+        void queryClient.invalidateQueries({ queryKey: treasuryKeys.withdrawal(address, id) })
+        void queryClient.invalidateQueries({ queryKey: treasuryKeys.config(address) })
       } else {
         setAction(key, { stage: "error", message: result.message })
       }
@@ -304,7 +309,7 @@ export function useTreasury() {
     approve,
     execute,
     trackId,
-    refresh: refreshAll,
+    refresh: () => { void queryClient.invalidateQueries({ queryKey: treasuryKeys.all }) },
     currentSigner: address,
     isSigner,
     isWithdrawalMet,

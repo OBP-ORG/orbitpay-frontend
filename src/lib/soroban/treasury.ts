@@ -55,21 +55,35 @@ async function client(signer: WalletSigner | null): Promise<contract.Client> {
   return getTreasuryClient(signer);
 }
 
-/** Dynamic per-contract methods aren't in `contract.Client`'s static type — see module doc. */
-type DynamicClient = contract.Client & Record<string, (...args: unknown[]) => Promise<contract.AssembledTransaction<unknown>>>;
+/**
+ * `contract.Client.from()` loads the deployed spec and decodes each return
+ * value. The SDK cannot infer those dynamically loaded methods, so this is
+ * the typed boundary between the contract client and the application.
+ */
+type TreasuryClient = contract.Client & {
+  get_config(): Promise<contract.AssembledTransaction<TreasuryConfigView>>;
+  get_withdrawal(args: { id: number }): Promise<contract.AssembledTransaction<WithdrawalView>>;
+  propose_withdrawal(args: { recipient: string; amount: bigint; memo: string }): Promise<contract.AssembledTransaction<number>>;
+  approve_withdrawal(args: { id: number }): Promise<contract.AssembledTransaction<void>>;
+  execute_withdrawal(args: { id: number }): Promise<contract.AssembledTransaction<void>>;
+};
 
 export { isTreasuryConfigured };
 
-export async function getTreasuryConfig(): Promise<LifecycleResult<TreasuryConfigView>> {
-  const c = (await client(null)) as DynamicClient;
-  return runInvocation(() => c.get_config() as Promise<contract.AssembledTransaction<TreasuryConfigView>>);
+async function read<T>(build: () => Promise<contract.AssembledTransaction<T>>): Promise<T> {
+  const result = await runInvocation(build);
+  if (result.status === "error") throw new Error(result.message);
+  return result.result;
 }
 
-export async function getWithdrawal(id: number): Promise<LifecycleResult<WithdrawalView>> {
-  const c = (await client(null)) as DynamicClient;
-  return runInvocation(
-    () => c.get_withdrawal({ id }) as Promise<contract.AssembledTransaction<WithdrawalView>>,
-  );
+export async function getTreasuryConfig(): Promise<TreasuryConfigView> {
+  const c = (await client(null)) as TreasuryClient;
+  return read(() => c.get_config());
+}
+
+export async function getWithdrawal(id: number): Promise<WithdrawalView> {
+  const c = (await client(null)) as TreasuryClient;
+  return read(() => c.get_withdrawal({ id }));
 }
 
 /**
@@ -93,7 +107,7 @@ export async function proposeWithdrawal(
   args: { token: string; recipient: string; amount: bigint; memo: string },
   onStage?: Parameters<typeof runInvocation>[1],
 ): Promise<LifecycleResult<number>> {
-  const c = (await client(signer)) as DynamicClient;
+  const c = (await client(signer)) as TreasuryClient;
   return runInvocation(
     () =>
       c.create_withdrawal({
@@ -112,7 +126,7 @@ export async function approveWithdrawal(
   id: number,
   onStage?: Parameters<typeof runInvocation>[1],
 ): Promise<LifecycleResult<void>> {
-  const c = (await client(signer)) as DynamicClient;
+  const c = (await client(signer)) as TreasuryClient;
   return runInvocation(
     () =>
       c.approve_withdrawal({ signer: signer.publicKey, proposal_id: id }) as Promise<
@@ -127,7 +141,7 @@ export async function executeWithdrawal(
   id: number,
   onStage?: Parameters<typeof runInvocation>[1],
 ): Promise<LifecycleResult<void>> {
-  const c = (await client(signer)) as DynamicClient;
+  const c = (await client(signer)) as TreasuryClient;
   return runInvocation(
     () =>
       c.execute_withdrawal({ executor: signer.publicKey, proposal_id: id }) as Promise<
