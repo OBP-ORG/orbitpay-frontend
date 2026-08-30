@@ -40,6 +40,34 @@ export default function TreasuryPage() {
     )
   }
 
+  if (!isConnected) {
+    return (
+      <div className="flex flex-col gap-6 p-6 pt-24 md:p-10">
+        <h1 className="text-3xl font-semibold tracking-tight">Treasury</h1>
+        <Card className="border-dashed"><CardContent className="text-muted-foreground p-6 text-sm">Connect a wallet to read the live treasury balance and signer policy.</CardContent></Card>
+      </div>
+    )
+  }
+
+  if (treasury.configLoading) {
+    return (
+      <div className="flex flex-col gap-6 p-6 pt-24 md:p-10">
+        <h1 className="text-3xl font-semibold tracking-tight">Treasury</h1>
+        <Card><CardContent className="text-muted-foreground p-6 text-sm">Loading live treasury data...</CardContent></Card>
+      </div>
+    )
+  }
+
+  if (treasury.configError || !treasury.config) {
+    return (
+      <div className="flex flex-col gap-6 p-6 pt-24 md:p-10">
+        <h1 className="text-3xl font-semibold tracking-tight">Treasury</h1>
+        <TxStatusBanner stage="error" errorMessage={treasury.configError ?? "The treasury has not been initialized yet."} />
+        <Button className="w-fit" variant="outline" onClick={treasury.refresh}><RefreshCw data-icon="inline-start" />Retry</Button>
+      </div>
+    )
+  }
+
   // eslint-disable-next-line react-hooks/purity -- one-time snapshot for a disabled-state check, not render output
   const nowSeconds = Math.floor(Date.now() / 1000)
   const proposeAction = treasury.actionState("propose")
@@ -65,13 +93,13 @@ export default function TreasuryPage() {
   }
 
   const stats = [
-    { label: "Balance", value: treasury.config ? stroopsToXLM(String(treasury.config.balance)) : "…", icon: Landmark },
+    { label: "Balance", value: stroopsToXLM(String(treasury.config.balance)), icon: Landmark },
     {
       label: "Threshold",
-      value: treasury.config ? `${treasury.config.threshold} of ${treasury.config.signers.length}` : "…",
+      value: `${treasury.config.threshold} of ${treasury.config.signers.length}`,
       icon: Check,
     },
-    { label: "Signers", value: treasury.config ? String(treasury.config.signers.length) : "…", icon: Check },
+    { label: "Signers", value: String(treasury.config.signers.length), icon: Check },
     { label: "Pending", value: String(treasury.pendingWithdrawals.length), icon: Clock },
   ]
 
@@ -173,6 +201,9 @@ export default function TreasuryPage() {
         </TabsList>
 
         <TabsContent value="pending" className="flex flex-col gap-4">
+          {Object.entries(treasury.withdrawalErrors).map(([id, message]) => (
+            <TxStatusBanner key={id} stage="error" errorMessage={`Withdrawal #${id}: ${message}`} />
+          ))}
           {treasury.pendingWithdrawals.length === 0 && (
             <p className="text-muted-foreground text-sm">No tracked pending withdrawals.</p>
           )}

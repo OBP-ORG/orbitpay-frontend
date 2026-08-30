@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useFreighter } from "@/contexts/FreighterContext"
 import {
   approveWithdrawal,
@@ -9,7 +10,6 @@ import {
   getWithdrawal,
   isTreasuryConfigured,
   proposeWithdrawal,
-  type TreasuryConfigView,
   type WithdrawalView,
 } from "@/lib/soroban/treasury"
 import type { LifecycleStage } from "@/lib/soroban/txLifecycle"
@@ -41,73 +41,51 @@ export interface ActionState {
 
 const IDLE_ACTION: ActionState = { stage: null, message: null }
 
+/** Account-specific keys prevent a previous wallet's reads from becoming the current wallet's UI. */
+export const treasuryKeys = {
+  all: ["orbitpay", "treasury"] as const,
+  config: (address: string | null) => [...treasuryKeys.all, "config", address] as const,
+  withdrawal: (address: string | null, id: number) => [...treasuryKeys.all, "withdrawal", address, id] as const,
+}
+
 export function useTreasury() {
   const { address, signTransaction } = useFreighter()
+  const queryClient = useQueryClient()
   const configured = isTreasuryConfigured()
 
-  const [config, setConfig] = useState<TreasuryConfigView | null>(null)
-  const [configError, setConfigError] = useState<string | null>(null)
-  const [configLoading, setConfigLoading] = useState(false)
-
   const [knownIds, setKnownIds] = useState<number[]>([])
-  const [withdrawals, setWithdrawals] = useState<Record<number, WithdrawalView>>({})
-  const [withdrawalErrors, setWithdrawalErrors] = useState<Record<number, string>>({})
-
   const [actions, setActions] = useState<Record<string, ActionState>>({})
+
+  const configQuery = useQuery({
+    queryKey: treasuryKeys.config(address),
+    queryFn: getTreasuryConfig,
+    enabled: configured && address !== null,
+  })
+  const withdrawalQueries = useQueries({
+    queries: knownIds.map((id) => ({
+      queryKey: treasuryKeys.withdrawal(address, id),
+      queryFn: () => getWithdrawal(id),
+      enabled: configured && address !== null,
+    })),
+  })
+
+  const withdrawals = useMemo(
+    () => Object.fromEntries(withdrawalQueries.flatMap((query, index) => query.data ? [[knownIds[index], query.data]] : [])) as Record<number, WithdrawalView>,
+    [knownIds, withdrawalQueries],
+  )
+  const withdrawalErrors = useMemo(
+    () => Object.fromEntries(withdrawalQueries.flatMap((query, index) => query.error ? [[knownIds[index], query.error.message]] : [])) as Record<number, string>,
+    [knownIds, withdrawalQueries],
+  )
 
   const setAction = useCallback((key: string, state: ActionState) => {
     setActions((prev) => ({ ...prev, [key]: state }))
-  }, [])
-
-  const refreshConfig = useCallback(async () => {
-    if (!configured) return
-    setConfigLoading(true)
-    setConfigError(null)
-    const result = await getTreasuryConfig()
-    if (result.status === "success") {
-      setConfig(result.result)
-    } else {
-      setConfigError(result.message)
-    }
-    setConfigLoading(false)
-  }, [configured])
-
-  const refreshWithdrawal = useCallback(
-    async (id: number) => {
-      const result = await getWithdrawal(id)
-      if (result.status === "success") {
-        setWithdrawals((prev) => ({ ...prev, [id]: result.result }))
-        setWithdrawalErrors((prev) => {
-          const next = { ...prev }
-          delete next[id]
-          return next
-        })
-      } else {
-        setWithdrawalErrors((prev) => ({ ...prev, [id]: result.message }))
-      }
-    },
-    [],
-  )
-
-  const refreshAll = useCallback(() => {
-    void refreshConfig()
-    knownIds.forEach((id) => void refreshWithdrawal(id))
-  }, [refreshConfig, refreshWithdrawal, knownIds])
+  }, [setActions])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time hydration of persisted state on mount
     setKnownIds(loadKnownIds())
-  }, [])
-
-  useEffect(() => {
-    if (!configured) return
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial data fetch on mount, standard pattern
-    void refreshConfig()
-  }, [configured, refreshConfig])
-
-  useEffect(() => {
-    knownIds.forEach((id) => void refreshWithdrawal(id))
-  }, [knownIds, refreshWithdrawal])
+  }, [setKnownIds])
 
   const trackId = useCallback((id: number) => {
     setKnownIds((prev) => {
@@ -116,7 +94,7 @@ export function useTreasury() {
       saveKnownIds(next)
       return next
     })
-  }, [])
+  }, [setKnownIds])
 
   const propose = useCallback(
     async (args: { recipient: string; amount: bigint; memo: string }) => {
@@ -146,12 +124,12 @@ export function useTreasury() {
       const result = await approveWithdrawal({ publicKey: address, signTransaction }, id, onStage)
       if (result.status === "success") {
         setAction(key, { stage: "success", message: "Approval recorded." })
-        void refreshWithdrawal(id)
+        void queryClient.invalidateQueries({ queryKey: treasuryKeys.withdrawal(address, id) })
       } else {
         setAction(key, { stage: "error", message: result.message })
       }
     },
-    [address, signTransaction, setAction, refreshWithdrawal],
+    [address, signTransaction, setAction, queryClient],
   )
 
   const execute = useCallback(
@@ -162,12 +140,13 @@ export function useTreasury() {
       const result = await executeWithdrawal({ publicKey: address, signTransaction }, id, onStage)
       if (result.status === "success") {
         setAction(key, { stage: "success", message: "Withdrawal executed." })
-        void refreshWithdrawal(id)
+        void queryClient.invalidateQueries({ queryKey: treasuryKeys.withdrawal(address, id) })
+        void queryClient.invalidateQueries({ queryKey: treasuryKeys.config(address) })
       } else {
         setAction(key, { stage: "error", message: result.message })
       }
     },
-    [address, signTransaction, setAction, refreshWithdrawal],
+    [address, signTransaction, setAction, queryClient],
   )
 
   const actionState = useCallback((key: string): ActionState => actions[key] ?? IDLE_ACTION, [actions])
@@ -183,9 +162,9 @@ export function useTreasury() {
 
   return {
     configured,
-    config,
-    configError,
-    configLoading,
+    config: configQuery.data ?? null,
+    configError: configQuery.error?.message ?? null,
+    configLoading: configQuery.isPending && configQuery.isFetching,
     withdrawals,
     withdrawalErrors,
     pendingWithdrawals,
@@ -195,7 +174,7 @@ export function useTreasury() {
     approve,
     execute,
     trackId,
-    refresh: refreshAll,
+    refresh: () => { void queryClient.invalidateQueries({ queryKey: treasuryKeys.all }) },
     currentSigner: address,
   }
 }
