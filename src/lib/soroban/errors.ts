@@ -26,6 +26,24 @@
 const CONTRACT_ERROR_PATTERN = /Error\(Contract, #(\d+)\)/;
 
 /**
+ * Canonical wording for the policy failures the issue calls out by name.
+ * Exported so client-side preflight checks (`treasury.ts`'s
+ * `checkWithdrawalPolicy` / `isWithdrawalPolicyStale`) can show the exact
+ * same copy *before* simulation as this module decodes *after* a contract
+ * rejects a call — one source of truth for what each policy failure says.
+ */
+export const POLICY_ERROR_MESSAGES = {
+  paused: "The treasury is currently paused. Withdrawals are disabled until an admin resumes it.",
+  timelock: "This withdrawal's timelock has not expired yet. Try again once it elapses.",
+  threshold: "This withdrawal has not reached the required number of signer approvals yet.",
+  insufficientBalance: "The treasury does not hold enough balance to cover this withdrawal.",
+  notApproved: "This proposal has not been approved yet.",
+  unauthorized: "Your connected wallet is not authorized to perform this action.",
+  stalePolicy:
+    "The treasury's signer policy has changed since this withdrawal was proposed. Refresh to confirm the current requirements before approving or executing.",
+} as const;
+
+/**
  * Friendly overrides keyed by the *name* the contract's own error message
  * contains (case-insensitive substring match), for the specific cases the
  * issue names. These only kick in as a nicer rewording of a message we
@@ -34,12 +52,13 @@ const CONTRACT_ERROR_PATTERN = /Error\(Contract, #(\d+)\)/;
  * automatic decode, described above, owns that).
  */
 const FRIENDLY_NAME_OVERRIDES: Array<{ match: RegExp; message: string }> = [
-  { match: /paused/i, message: "The treasury is currently paused. Withdrawals are disabled until an admin resumes it." },
-  { match: /timelock/i, message: "This withdrawal's timelock has not expired yet. Try again once it elapses." },
-  { match: /threshold/i, message: "This withdrawal has not reached the required number of signer approvals yet." },
-  { match: /insufficient.?funds|insufficient.?balance/i, message: "The treasury does not hold enough balance to cover this withdrawal." },
-  { match: /not.?approved/i, message: "This proposal has not been approved yet." },
-  { match: /unauthorized/i, message: "Your connected wallet is not authorized to perform this action." },
+  { match: /paused/i, message: POLICY_ERROR_MESSAGES.paused },
+  { match: /timelock/i, message: POLICY_ERROR_MESSAGES.timelock },
+  { match: /threshold/i, message: POLICY_ERROR_MESSAGES.threshold },
+  { match: /insufficient.?funds|insufficient.?balance/i, message: POLICY_ERROR_MESSAGES.insufficientBalance },
+  { match: /not.?approved/i, message: POLICY_ERROR_MESSAGES.notApproved },
+  { match: /unauthorized/i, message: POLICY_ERROR_MESSAGES.unauthorized },
+  { match: /stale.?policy|policy.?(changed|outdated|stale)|config.?(changed|mismatch)/i, message: POLICY_ERROR_MESSAGES.stalePolicy },
 ];
 
 /** Named errors thrown by `AssembledTransaction`/`SentTransaction` themselves (not the contract). */

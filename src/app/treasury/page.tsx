@@ -15,6 +15,7 @@ import { useTreasury } from "@/hooks/useTreasury"
 import { TxStatusBanner } from "@/components/tx-status-banner"
 import { isStellarAddress } from "@/lib/validation"
 import { stroopsToXLM, xlmToStroops } from "@/lib/amount"
+import { NATIVE_TOKEN_CONTRACT_ID } from "@/lib/soroban/config"
 
 export default function TreasuryPage() {
   const { isConnected, address } = useFreighter()
@@ -23,6 +24,7 @@ export default function TreasuryPage() {
   const [trackIdInput, setTrackIdInput] = useState("")
   const [form, setForm] = useState({ recipient: "", amount: "", memo: "" })
   const [formError, setFormError] = useState<string | null>(null)
+  const [checkingPolicy, setCheckingPolicy] = useState(false)
 
   if (!treasury.configured) {
     return (
@@ -89,11 +91,26 @@ export default function TreasuryPage() {
       setFormError("Amount must be greater than zero")
       return
     }
-    await treasury.propose({ recipient: form.recipient, amount, memo: form.memo })
+    // Policy prerequisites (paused / authorized signer / sufficient live
+    // balance for this specific asset) are checked before a transaction is
+    // ever built or simulated — see `checkWithdrawalAuthorization` and
+    // `checkSufficientBalance` in lib/soroban/treasury.ts.
+    setCheckingPolicy(true)
+    const policyViolation = await treasury.checkProposalPolicy(NATIVE_TOKEN_CONTRACT_ID, amount)
+    setCheckingPolicy(false)
+    if (policyViolation) {
+      setFormError(policyViolation)
+      return
+    }
+    await treasury.propose({ token: NATIVE_TOKEN_CONTRACT_ID, recipient: form.recipient, amount, memo: form.memo })
   }
 
   const stats = [
-    { label: "Balance", value: stroopsToXLM(String(treasury.config.balance)), icon: Landmark },
+    {
+      label: "Balance",
+      value: treasury.balance !== null ? stroopsToXLM(String(treasury.balance)) : treasury.balanceError ? "—" : "…",
+      icon: Landmark,
+    },
     {
       label: "Threshold",
       value: `${treasury.config.threshold} of ${treasury.config.signers.length}`,
@@ -125,7 +142,15 @@ export default function TreasuryPage() {
           until an admin resumes it.
         </div>
       )}
+      {isConnected && treasury.config && !treasury.config.paused && !treasury.isSigner && (
+        <div className="border-destructive/40 bg-destructive/10 text-destructive flex items-center gap-2 rounded-md border p-3 text-sm">
+          <ShieldAlert className="size-4 shrink-0" />
+          Your connected wallet is not an authorized treasury signer. It can view withdrawals but
+          cannot propose, approve, or execute them.
+        </div>
+      )}
       {treasury.configError && <TxStatusBanner stage="error" errorMessage={treasury.configError} />}
+      {treasury.balanceError && <TxStatusBanner stage="error" errorMessage={treasury.balanceError} />}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map(({ label, value, icon: Icon }) => (
@@ -143,7 +168,7 @@ export default function TreasuryPage() {
         <Dialog open={withdrawOpen} onOpenChange={setWithdrawOpen}>
           <DialogTrigger
             render={
-              <Button disabled={!isConnected || treasury.config?.paused}>
+              <Button disabled={!isConnected || treasury.config?.paused || !treasury.isSigner}>
                 <ArrowUp data-icon="inline-start" />Propose Withdrawal
               </Button>
             }
@@ -165,7 +190,10 @@ export default function TreasuryPage() {
               </div>
               {formError && <TxStatusBanner stage="error" errorMessage={formError} />}
               <TxStatusBanner stage={proposeAction.stage} errorMessage={proposeAction.message} successMessage={proposeAction.message} />
-              <Button onClick={submitWithdrawal} disabled={proposeAction.stage !== null && proposeAction.stage !== "success" && proposeAction.stage !== "error"}>
+              <Button
+                onClick={submitWithdrawal}
+                disabled={checkingPolicy || (proposeAction.stage !== null && proposeAction.stage !== "success" && proposeAction.stage !== "error")}
+              >
                 Submit Proposal
               </Button>
             </div>
@@ -208,11 +236,17 @@ export default function TreasuryPage() {
             <p className="text-muted-foreground text-sm">No tracked pending withdrawals.</p>
           )}
           {treasury.pendingWithdrawals.map((w) => {
-            const threshold = treasury.config?.threshold ?? w.threshold
+            // Always judged against this withdrawal's own frozen threshold
+            // (a chain read), never the treasury's *current* config
+            // threshold — those can diverge if the signer policy changed
+            // after this withdrawal was proposed (see `isWithdrawalStale`).
+            const threshold = w.threshold
             const count = w.approvals.length
-            const met = count >= threshold
+            const met = treasury.isWithdrawalMet(w)
+            const stale = treasury.isWithdrawalStale(w)
             const hasApproved = !!address && w.approvals.includes(address)
             const timelockOpen = nowSeconds >= w.timelockExpiresAt
+            const canAct = isConnected && !treasury.config?.paused && treasury.isSigner
             const approveAction = treasury.actionState(`approve-${w.id}`)
             const executeAction = treasury.actionState(`execute-${w.id}`)
             return (
@@ -224,17 +258,24 @@ export default function TreasuryPage() {
                         <span className="font-mono text-sm font-medium">TX-{w.id}</span>
                         <Badge variant={met ? "default" : "secondary"}>{met ? "Ready" : "Pending"}</Badge>
                         {!timelockOpen && <Badge variant="outline">Timelocked</Badge>}
+                        {stale && <Badge variant="outline">Policy changed</Badge>}
                       </div>
                       <p className="text-muted-foreground text-sm">
                         To: {w.recipient} · {stroopsToXLM(String(w.amount))} · {w.memo}
                       </p>
+                      {stale && (
+                        <p className="text-muted-foreground text-xs">
+                          The treasury&apos;s signer threshold has changed since this withdrawal was
+                          proposed. Refresh to confirm current requirements before acting on it.
+                        </p>
+                      )}
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       {!hasApproved && (
                         <Button
                           size="sm"
                           variant="outline"
-                          disabled={!isConnected || treasury.config?.paused}
+                          disabled={!canAct}
                           onClick={() => treasury.approve(w.id)}
                         >
                           <Check data-icon="inline-start" />Approve
@@ -243,7 +284,7 @@ export default function TreasuryPage() {
                       {met && (
                         <Button
                           size="sm"
-                          disabled={!isConnected || treasury.config?.paused || !timelockOpen}
+                          disabled={!canAct || !timelockOpen}
                           onClick={() => treasury.execute(w.id)}
                         >
                           Execute
