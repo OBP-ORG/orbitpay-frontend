@@ -12,9 +12,11 @@
 import { contract } from "@stellar/stellar-sdk";
 import {
   GOVERNANCE_CONTRACT_ID,
+  PAYROLL_CONTRACT_ID,
   SOROBAN_NETWORK_PASSPHRASE,
   SOROBAN_RPC_URL,
   TREASURY_CONTRACT_ID,
+  VESTING_CONTRACT_ID,
 } from "./config";
 import type { SignTransaction } from "@/contexts/FreighterContext";
 
