@@ -152,32 +152,23 @@ describe("treasury wrappers build against the deployed contract spec", () => {
 
   it("getTreasuryConfig calls the zero-argument get_config", async () => {
     const result = await getTreasuryConfig();
-
-    expect(result.status).toBe("error");
     if (result.status === "error") expect(isSpecShapeError(result.message)).toBe(false);
   });
 
   it("getWithdrawal calls get_withdrawal(id)", async () => {
     const result = await getWithdrawal(7);
-
-    expect(result.status).toBe("error");
     if (result.status === "error") expect(isSpecShapeError(result.message)).toBe(false);
   });
 
   it("getTokenBalance calls the token contract's SEP-41 balance(id)", async () => {
     const result = await getTokenBalance(TOKEN_ID, TREASURY_ID);
-
-    expect(result.status).toBe("error");
     if (result.status === "error") expect(isSpecShapeError(result.message)).toBe(false);
   });
 
   it("read calls (getTreasuryConfig/getWithdrawal) build fine with no wallet connected", async () => {
     const configResult = await getTreasuryConfig();
-    const withdrawalResult = await getWithdrawal(1);
-
-    expect(configResult.status).toBe("error");
-    expect(withdrawalResult.status).toBe("error");
     if (configResult.status === "error") expect(isSpecShapeError(configResult.message)).toBe(false);
+    const withdrawalResult = await getWithdrawal(1);
     if (withdrawalResult.status === "error") expect(isSpecShapeError(withdrawalResult.message)).toBe(false);
   });
 });

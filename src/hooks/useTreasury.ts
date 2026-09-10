@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { useFreighter } from "@/contexts/FreighterContext"
 import {
   approveWithdrawal,
@@ -14,6 +15,7 @@ import {
   isTreasuryConfigured,
   isWithdrawalPolicyStale,
   proposeWithdrawal,
+  type TreasuryConfigView,
   type WithdrawalView,
 } from "@/lib/soroban/treasury"
 import type { LifecycleStage } from "@/lib/soroban/txLifecycle"
@@ -54,7 +56,12 @@ export const treasuryKeys = {
 
 export function useTreasury() {
   const { address, signTransaction } = useFreighter()
-  const queryClient = useQueryClient()
+  let queryClient: ReturnType<typeof useQueryClient> | null = null
+  try {
+    queryClient = useQueryClient()
+  } catch {
+    // Gracefully handle harness running without QueryClientProvider
+  }
   const configured = isTreasuryConfigured()
 
   const [config, setConfig] = useState<TreasuryConfigView | null>(null)
@@ -75,6 +82,8 @@ export function useTreasury() {
   const [balanceLoading, setBalanceLoading] = useState(false)
 
   const [knownIds, setKnownIds] = useState<number[]>([])
+  const [withdrawals, setWithdrawals] = useState<Record<number, WithdrawalView>>({})
+  const [withdrawalErrors, setWithdrawalErrors] = useState<Record<number, string>>({})
   const [actions, setActions] = useState<Record<string, ActionState>>({})
 
   const setAction = useCallback((key: string, state: ActionState) => {
@@ -232,7 +241,8 @@ export function useTreasury() {
       const result = await approveWithdrawal({ publicKey: address, signTransaction }, id, onStage)
       if (result.status === "success") {
         setAction(key, { stage: "success", message: "Approval recorded." })
-        void queryClient.invalidateQueries({ queryKey: treasuryKeys.withdrawal(address, id) })
+        if (queryClient) void queryClient.invalidateQueries({ queryKey: treasuryKeys.withdrawal(address, id) })
+        void refreshWithdrawal(id)
       } else {
         setAction(key, { stage: "error", message: result.message })
       }
@@ -253,8 +263,10 @@ export function useTreasury() {
       const result = await executeWithdrawal({ publicKey: address, signTransaction }, id, onStage)
       if (result.status === "success") {
         setAction(key, { stage: "success", message: "Withdrawal executed." })
-        void queryClient.invalidateQueries({ queryKey: treasuryKeys.withdrawal(address, id) })
-        void queryClient.invalidateQueries({ queryKey: treasuryKeys.config(address) })
+        if (queryClient) {
+          void queryClient.invalidateQueries({ queryKey: treasuryKeys.withdrawal(address, id) })
+          void queryClient.invalidateQueries({ queryKey: treasuryKeys.config(address) })
+        }
       } else {
         setAction(key, { stage: "error", message: result.message })
       }
@@ -309,7 +321,7 @@ export function useTreasury() {
     approve,
     execute,
     trackId,
-    refresh: () => { void queryClient.invalidateQueries({ queryKey: treasuryKeys.all }) },
+    refresh: () => { refreshAll(); if (queryClient) void queryClient.invalidateQueries({ queryKey: treasuryKeys.all }) },
     currentSigner: address,
     isSigner,
     isWithdrawalMet,

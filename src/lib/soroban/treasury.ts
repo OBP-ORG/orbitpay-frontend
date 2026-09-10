@@ -63,27 +63,29 @@ async function client(signer: WalletSigner | null): Promise<contract.Client> {
 type TreasuryClient = contract.Client & {
   get_config(): Promise<contract.AssembledTransaction<TreasuryConfigView>>;
   get_withdrawal(args: { id: number }): Promise<contract.AssembledTransaction<WithdrawalView>>;
-  propose_withdrawal(args: { recipient: string; amount: bigint; memo: string }): Promise<contract.AssembledTransaction<number>>;
-  approve_withdrawal(args: { id: number }): Promise<contract.AssembledTransaction<void>>;
-  execute_withdrawal(args: { id: number }): Promise<contract.AssembledTransaction<void>>;
+  create_withdrawal(args: {
+    proposer: string;
+    token: string;
+    recipient: string;
+    amount: bigint;
+    memo: string;
+  }): Promise<contract.AssembledTransaction<number>>;
+  approve_withdrawal(args: { signer: string; proposal_id: number }): Promise<contract.AssembledTransaction<void>>;
+  execute_withdrawal(args: { executor: string; proposal_id: number }): Promise<contract.AssembledTransaction<void>>;
 };
+
+type DynamicClient = contract.Client & Record<string, (...args: unknown[]) => Promise<contract.AssembledTransaction<unknown>>>;
 
 export { isTreasuryConfigured };
 
-async function read<T>(build: () => Promise<contract.AssembledTransaction<T>>): Promise<T> {
-  const result = await runInvocation(build);
-  if (result.status === "error") throw new Error(result.message);
-  return result.result;
+export async function getTreasuryConfig(): Promise<LifecycleResult<TreasuryConfigView>> {
+  const c = (await client(null)) as TreasuryClient;
+  return runInvocation(() => c.get_config());
 }
 
-export async function getTreasuryConfig(): Promise<TreasuryConfigView> {
+export async function getWithdrawal(id: number): Promise<LifecycleResult<WithdrawalView>> {
   const c = (await client(null)) as TreasuryClient;
-  return read(() => c.get_config());
-}
-
-export async function getWithdrawal(id: number): Promise<WithdrawalView> {
-  const c = (await client(null)) as TreasuryClient;
-  return read(() => c.get_withdrawal({ id }));
+  return runInvocation(() => c.get_withdrawal({ id }));
 }
 
 /**

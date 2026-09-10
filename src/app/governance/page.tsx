@@ -16,11 +16,12 @@ import { useGovernance } from "@/hooks/useGovernance"
 import { TxStatusBanner } from "@/components/tx-status-banner"
 import { isStellarAddress } from "@/lib/validation"
 import { stroopsToXLM, xlmToStroops } from "@/lib/amount"
-import type { ProposalView } from "@/lib/soroban/governance"
+import { type ProposalView, isGovernanceWritesEnabled } from "@/lib/soroban/governance"
 
 export default function GovernancePage() {
   const { isConnected } = useFreighter()
   const gov = useGovernance()
+  const writesEnabled = isGovernanceWritesEnabled()
   const [open, setOpen] = useState(false)
   const [trackIdInput, setTrackIdInput] = useState("")
   const [form, setForm] = useState<{
@@ -95,7 +96,7 @@ export default function GovernancePage() {
           <p className="text-muted-foreground">DAO proposals, weighted voting, on-chain execution</p>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger render={<Button disabled={!isConnected}><Plus data-icon="inline-start" />Create Proposal</Button>} />
+          <DialogTrigger render={<Button disabled={!isConnected || !writesEnabled}><Plus data-icon="inline-start" />Create Proposal</Button>} />
           <DialogContent className="sm:max-w-lg">
             <DialogHeader><DialogTitle>Create Proposal</DialogTitle></DialogHeader>
             <div className="flex flex-col gap-4">
