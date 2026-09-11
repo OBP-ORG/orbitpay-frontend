@@ -12,6 +12,15 @@ import type { contract } from "@stellar/stellar-sdk";
 import { getGovernanceClient, type WalletSigner } from "./client";
 import { runInvocation, type LifecycleResult } from "./txLifecycle";
 import { isGovernanceConfigured } from "./config";
+import {
+  assertGovernanceCompatibility,
+  isGovernanceAbiVerified,
+  setGovernanceAbiVerified,
+  evaluateProposalState,
+  type CanonicalProposal,
+  type CanonicalProposalStatus,
+  type CanonicalGovernanceConfig,
+} from "./governanceAbi";
 
 export interface GovernanceConfigView {
   totalWeight: number;
@@ -42,7 +51,17 @@ async function client(signer: WalletSigner | null): Promise<contract.Client> {
 /** Dynamic per-contract methods aren't in `contract.Client`'s static type — see module doc. */
 type DynamicClient = contract.Client & Record<string, (...args: unknown[]) => Promise<contract.AssembledTransaction<unknown>>>;
 
-export { isGovernanceConfigured };
+export {
+  isGovernanceConfigured,
+  isGovernanceAbiVerified,
+  setGovernanceAbiVerified,
+  evaluateProposalState,
+};
+export type { CanonicalProposal, CanonicalProposalStatus, CanonicalGovernanceConfig };
+
+export function isGovernanceWritesEnabled(): boolean {
+  return isGovernanceConfigured() && isGovernanceAbiVerified();
+}
 
 export async function getGovernanceConfig(): Promise<LifecycleResult<GovernanceConfigView>> {
   const c = (await client(null)) as DynamicClient;
@@ -67,6 +86,15 @@ export async function createProposal(
   },
   onStage?: Parameters<typeof runInvocation>[1],
 ): Promise<LifecycleResult<number>> {
+  try {
+    assertGovernanceCompatibility();
+  } catch (err) {
+    return {
+      status: "error",
+      stage: "error",
+      message: err instanceof Error ? err.message : "Governance writes are currently gated.",
+    };
+  }
   const c = (await client(signer)) as DynamicClient;
   return runInvocation(
     () => c.create_proposal(args) as Promise<contract.AssembledTransaction<number>>,
@@ -80,6 +108,15 @@ export async function vote(
   support: boolean,
   onStage?: Parameters<typeof runInvocation>[1],
 ): Promise<LifecycleResult<void>> {
+  try {
+    assertGovernanceCompatibility();
+  } catch (err) {
+    return {
+      status: "error",
+      stage: "error",
+      message: err instanceof Error ? err.message : "Governance writes are currently gated.",
+    };
+  }
   const c = (await client(signer)) as DynamicClient;
   return runInvocation(
     () => c.vote({ id, support }) as Promise<contract.AssembledTransaction<void>>,
@@ -92,6 +129,15 @@ export async function executeProposal(
   id: number,
   onStage?: Parameters<typeof runInvocation>[1],
 ): Promise<LifecycleResult<void>> {
+  try {
+    assertGovernanceCompatibility();
+  } catch (err) {
+    return {
+      status: "error",
+      stage: "error",
+      message: err instanceof Error ? err.message : "Governance writes are currently gated.",
+    };
+  }
   const c = (await client(signer)) as DynamicClient;
   return runInvocation(
     () => c.execute_proposal({ id }) as Promise<contract.AssembledTransaction<void>>,
